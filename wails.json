@@ -9,8 +9,31 @@
   "info": {
     "companyName": "Mdmuder",
     "productName": "Mdmuder",
-    "productVersion": "0.1.0",
+    "productVersion": "0.2.0",
     "copyright": "Copyright © 2026 Mdmuder",
-    "comments": "A focused Markdown editor for Windows"
+    "comments": "A focused Markdown editor for Windows",
+    "fileAssociations": [
+      {
+        "ext": "md",
+        "name": "Mdmuder.Markdown",
+        "description": "Markdown 文档",
+        "iconName": "appicon",
+        "role": "Editor"
+      },
+      {
+        "ext": "markdown",
+        "name": "Mdmuder.Markdown",
+        "description": "Markdown 文档",
+        "iconName": "appicon",
+        "role": "Editor"
+      },
+      {
+        "ext": "mdown",
+        "name": "Mdmuder.Markdown",
+        "description": "Markdown 文档",
+        "iconName": "appicon",
+        "role": "Editor"
+      }
+    ]
   }
 }

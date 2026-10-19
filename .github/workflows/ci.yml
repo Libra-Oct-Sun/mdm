@@ -45,7 +45,7 @@ jobs:
         run: go test ./...
 
   frontend:
-    name: Serializer tests
+    name: Frontend tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +62,7 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           node --check frontend/src/markdown-serializer.js
+          node --check frontend/src/editor-search.js
           node --check frontend/src/main.js
 
       - name: Test Markdown serialization
@@ -82,8 +83,15 @@ jobs:
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
 
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: Add NSIS to PATH
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files (x86)\NSIS"
+
       - name: Build executable
-        run: wails build -clean -skipbindings
+        run: wails build -clean -skipbindings -nsis -installscope user
 
       - name: Package artifact
         shell: pwsh
@@ -97,6 +105,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item "build/bin/Mdmuder.exe" "$dist/$packageName.exe"
           Compress-Archive -Path "build/bin/Mdmuder.exe" -DestinationPath "$dist/$packageName.zip"
+          $installer = Get-ChildItem "build/bin/*installer.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "NSIS installer was not generated."
+          }
+          Copy-Item $installer.FullName "$dist/$packageName-installer.exe"
           $files = Get-ChildItem $dist -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" }
           $lines = foreach ($file in $files) {
             $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()

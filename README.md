@@ -18,6 +18,9 @@ Markdown 标记只在后台生成和保存，不占用编辑视图。
 - 输入 `# `、`- `、`1. `、`> ` 或 ` ``` ` 自动转换 Markdown 块格式
 - 输入 `**文字**`、`*文字*`、`~~文字~~`、`` `文字` `` 自动转换为富文本
 - 撤销 / 重做、查找、列表自动续写、Tab 缩进
+- 查找替换、未保存草稿自动恢复
+- 直接粘贴剪贴板截图，自动保存到文档旁并插入相对路径
+- Windows 安装包与 `.md` / `.markdown` / `.mdown` 文件关联
 - 浅色 / 深色主题
 - 文档内相对路径图片显示
 
@@ -40,8 +43,9 @@ wails dev
 ```
 
 该脚本会检查 Go 格式、运行 `go vet` 和 Go 单元测试、检查前端语法、
-运行 HTML→Markdown 序列化测试，最后执行一次 Windows 构建。
+运行前端序列化、查找替换、恢复草稿和图片粘贴测试，最后执行一次 Windows 构建。
 如果只想运行快速检查，可以使用 `.\scripts\test.ps1 -SkipBuild`。
+需要同时验证安装包时，使用 `.\scripts\test.ps1 -Installer`。
 
 构建 Windows 可执行文件：
 
@@ -50,6 +54,14 @@ wails build -clean
 ```
 
 产物位于 `build/bin/Mdmuder.exe`。
+
+构建带文件关联的用户级安装包（需要 NSIS）：
+
+```powershell
+wails build -clean -nsis -installscope user
+```
+
+安装包会注册 `.md`、`.markdown` 和 `.mdown` 文件关联。
 
 ## 发布
 
@@ -75,6 +87,7 @@ Release，并附加可执行文件、ZIP 包和 SHA-256 校验文件。
 | `Ctrl+I` | 斜体 |
 | `Ctrl+K` | 插入链接 |
 | `Ctrl+F` | 查找 |
+| `Ctrl+H` | 查找并替换 |
 | `Ctrl+Z` / `Ctrl+Y` | 撤销 / 重做 |
 | `Ctrl+\` | 显示或隐藏大纲 |
 
