@@ -1,5 +1,7 @@
 # Mdmuder
 
+[![CI](https://github.com/Libra-Oct-Sun/mdm/actions/workflows/ci.yml/badge.svg)](https://github.com/Libra-Oct-Sun/mdm/actions/workflows/ci.yml)
+
 一个面向 Windows 的 Markdown 桌面编辑器，使用 Go + Wails（WebView2）构建。
 界面参考 Typora 的单栏专注写作体验：正文直接以标题、粗体、列表、表格等格式编辑，
 Markdown 标记只在后台生成和保存，不占用编辑视图。
@@ -34,8 +36,12 @@ wails dev
 运行测试：
 
 ```powershell
-go test ./...
+.\scripts\test.ps1
 ```
+
+该脚本会检查 Go 格式、运行 `go vet` 和 Go 单元测试、检查前端语法、
+运行 HTML→Markdown 序列化测试，最后执行一次 Windows 构建。
+如果只想运行快速检查，可以使用 `.\scripts\test.ps1 -SkipBuild`。
 
 构建 Windows 可执行文件：
 
@@ -44,6 +50,18 @@ wails build -clean
 ```
 
 产物位于 `build/bin/Mdmuder.exe`。
+
+## 发布
+
+推送到 `main` 的提交和 Pull Request 会自动运行 CI。发布时推送语义化版本标签：
+
+```powershell
+git tag -a v0.1.0 -m "Release 0.1.0"
+git push origin v0.1.0
+```
+
+标签会触发 Release 工作流：先执行全部测试和 Windows 构建，再创建 GitHub
+Release，并附加可执行文件、ZIP 包和 SHA-256 校验文件。
 
 ## 快捷键
 

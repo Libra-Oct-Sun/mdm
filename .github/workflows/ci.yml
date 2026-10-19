@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go quality gates
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        shell: pwsh
+        run: |
+          $goFiles = @(git ls-files -- "*.go")
+          if (-not $goFiles) {
+            throw "No Go source files found."
+          }
+          $unformatted = @(gofmt -l $goFiles)
+          if ($unformatted) {
+            $unformatted
+            throw "Go files need formatting."
+          }
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  frontend:
+    name: Serializer tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Install test dependencies
+        run: npm ci --prefix tests
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check frontend/src/markdown-serializer.js
+          node --check frontend/src/main.js
+
+      - name: Test Markdown serialization
+        run: npm test --prefix tests
+
+  windows-build:
+    name: Windows build
+    needs: [go, frontend]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+
+      - name: Build executable
+        run: wails build -clean -skipbindings
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if (-not $tag -or -not $tag.StartsWith("v")) {
+            $tag = "dev-$($env:GITHUB_SHA.Substring(0, 7))"
+          }
+          $packageName = "Mdmuder-$tag-windows-amd64"
+          $dist = "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item "build/bin/Mdmuder.exe" "$dist/$packageName.exe"
+          Compress-Archive -Path "build/bin/Mdmuder.exe" -DestinationPath "$dist/$packageName.zip"
+          $files = Get-ChildItem $dist -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" }
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($file.Name)"
+          }
+          $lines | Set-Content -Encoding ascii "$dist/SHA256SUMS.txt"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mdmuder-windows-amd64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
