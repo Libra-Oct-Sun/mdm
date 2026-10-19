@@ -199,6 +199,46 @@ func (a *App) SaveDocumentAs(content string) (*SaveResult, error) {
 	return a.saveToPath(path, content)
 }
 
+// SaveRecoveryDraft persists the latest unsaved editor snapshot.
+func (a *App) SaveRecoveryDraft(path, name, content, baseContent string) error {
+	dir, err := recoveryDirectory()
+	if err != nil {
+		return err
+	}
+	return saveRecoveryDraft(dir, &RecoveryDraft{
+		Path:        path,
+		Name:        name,
+		Content:     content,
+		BaseContent: baseContent,
+	})
+}
+
+// LoadRecoveryDraft returns an unsaved snapshot left by a previous session.
+func (a *App) LoadRecoveryDraft() (*RecoveryDraft, error) {
+	dir, err := recoveryDirectory()
+	if err != nil {
+		return nil, err
+	}
+	return loadRecoveryDraft(dir)
+}
+
+// ClearRecoveryDraft removes the recovery snapshot after save or discard.
+func (a *App) ClearRecoveryDraft() error {
+	dir, err := recoveryDirectory()
+	if err != nil {
+		return err
+	}
+	return clearRecoveryDraft(dir)
+}
+
+// SavePastedImage stores clipboard image data beside the current document.
+func (a *App) SavePastedImage(dataURL string) (*SavedImage, error) {
+	a.mu.RLock()
+	docPath := a.docPath
+	a.mu.RUnlock()
+	return savePastedImage(docPath, dataURL)
+}
+
 func (a *App) saveToPath(path, content string) (*SaveResult, error) {
 	path = strings.TrimSpace(path)
 	if filepath.Ext(path) == "" {

@@ -55,6 +55,10 @@ func readDocumentFile(path string) (*Document, error) {
 }
 
 func writeFileAtomic(filename string, data []byte) error {
+	return writeFileAtomicMode(filename, data, 0o644)
+}
+
+func writeFileAtomicMode(filename string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(filename)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -82,7 +86,7 @@ func writeFileAtomic(filename string, data []byte) error {
 		_ = os.Remove(tempName)
 		return err
 	}
-	if err := os.Chmod(tempName, 0o644); err != nil {
+	if err := os.Chmod(tempName, mode); err != nil {
 		_ = os.Remove(tempName)
 		return err
 	}
