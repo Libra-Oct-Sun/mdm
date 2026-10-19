@@ -81,7 +81,7 @@
                     <div class="menu-separator"></div>
                     <button data-command="insert-table"><span>插入表格</span></button>
                     <button data-command="insert-hr"><span>插入分隔线</span></button>
-                    <button data-command="find"><span>查找</span><kbd>Ctrl F</kbd></button>
+                    <button data-command="find"><span>查找与替换</span><kbd>Ctrl F</kbd></button>
                     <div class="menu-separator"></div>
                     <button data-command="font-smaller"><span>缩小字号</span><kbd>Ctrl −</kbd></button>
                     <button data-command="font-larger"><span>放大字号</span><kbd>Ctrl +</kbd></button>
@@ -128,7 +128,7 @@
                     <path d="M12.9 7.1l1-1a2.7 2.7 0 0 1 3.8 3.8l-2.3 2.3a2.7 2.7 0 0 1-3.8 0"></path>
                 </svg>
             </button>
-            <button data-command="image" title="插入图片" aria-label="插入图片">
+            <button data-command="image" title="插入图片（也可直接粘贴截图）" aria-label="插入图片">
                 <svg viewBox="0 0 20 20" aria-hidden="true">
                     <rect x="2.7" y="3.7" width="14.6" height="12.6" rx="2"></rect>
                     <circle cx="7" cy="7.7" r="1.2"></circle>
@@ -218,18 +218,26 @@
                 </div>
             </div>
             <div class="find-bar" id="findBar" hidden>
-                <input id="findInput" type="text" placeholder="查找内容" aria-label="查找内容"
-                       autocomplete="off" spellcheck="false"/>
-                <span id="findCount">0 / 0</span>
-                <button class="mini-btn" id="findPrev" title="上一个" aria-label="上一个">
-                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 12.5L10 7l5 5.5"></path></svg>
-                </button>
-                <button class="mini-btn" id="findNext" title="下一个" aria-label="下一个">
-                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 7.5L10 13l5-5.5"></path></svg>
-                </button>
-                <button class="mini-btn" id="findClose" title="关闭" aria-label="关闭查找">
-                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"></path></svg>
-                </button>
+                <div class="find-row">
+                    <input id="findInput" type="text" placeholder="查找内容" aria-label="查找内容"
+                           autocomplete="off" spellcheck="false"/>
+                    <span id="findCount">0 / 0</span>
+                    <button class="mini-btn" id="findPrev" title="上一个" aria-label="上一个">
+                        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 12.5L10 7l5 5.5"></path></svg>
+                    </button>
+                    <button class="mini-btn" id="findNext" title="下一个" aria-label="下一个">
+                        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 7.5L10 13l5-5.5"></path></svg>
+                    </button>
+                    <button class="mini-btn" id="findClose" title="关闭" aria-label="关闭查找">
+                        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"></path></svg>
+                    </button>
+                </div>
+                <div class="find-row replace-row">
+                    <input id="findReplaceInput" type="text" placeholder="替换为" aria-label="替换为"
+                           autocomplete="off" spellcheck="false"/>
+                    <button class="replace-btn" id="replaceOne" title="替换当前匹配 (Enter)">替换</button>
+                    <button class="replace-btn" id="replaceAll" title="替换全部匹配 (Ctrl+Enter)">全部</button>
+                </div>
             </div>
         </section>
     </main>
@@ -279,6 +287,7 @@
     </div>
 </div>
 <script src="/markdown-serializer.js"></script>
+<script src="/editor-search.js"></script>
 <script src="/main.js"></script>
 </body>
 </html>

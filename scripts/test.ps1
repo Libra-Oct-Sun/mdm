@@ -1,5 +1,6 @@
 param(
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$Installer
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,6 +32,8 @@ try {
     Assert-Success "go test"
     node --check frontend/src/markdown-serializer.js
     Assert-Success "markdown serializer syntax check"
+    node --check frontend/src/editor-search.js
+    Assert-Success "editor search syntax check"
     node --check frontend/src/main.js
     Assert-Success "editor syntax check"
     npm ci --prefix tests
@@ -39,8 +42,20 @@ try {
     Assert-Success "frontend tests"
 
     if (-not $SkipBuild) {
-        wails build -clean -skipbindings
-        Assert-Success "wails build"
+        if ($Installer) {
+            $nsisPath = "C:\Program Files (x86)\NSIS"
+            if (Test-Path (Join-Path $nsisPath "makensis.exe")) {
+                $env:Path = "$nsisPath;$env:Path"
+            }
+            wails build -clean -skipbindings -nsis -installscope user
+            Assert-Success "wails installer build"
+            if (-not (Get-ChildItem "build/bin/*installer.exe" -ErrorAction SilentlyContinue)) {
+                throw "NSIS installer was not generated."
+            }
+        } else {
+            wails build -clean -skipbindings
+            Assert-Success "wails build"
+        }
     }
 }
 finally {

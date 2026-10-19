@@ -11,6 +11,10 @@
     }
     const findOwnCheckbox = markdownSerializer.findOwnCheckbox;
     const isIgnoredNode = markdownSerializer.isIgnoredNode;
+    const editorSearch = window.MdmuderSearch;
+    if (!editorSearch) {
+        throw new Error("Editor search failed to load");
+    }
 
     const TEXT_BLOCK_TAGS = new Set([
         "P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6",
@@ -121,6 +125,7 @@
         btnMore: $("#btnMore"),
         findBar: $("#findBar"),
         findInput: $("#findInput"),
+        findReplaceInput: $("#findReplaceInput"),
         findCount: $("#findCount"),
     };
 
@@ -138,6 +143,9 @@
     let selectionFrame = 0;
     let scrollFrame = 0;
     let dragDepth = 0;
+    let recoveryTimer = 0;
+    let recoverySavedKey = "";
+    let recoveryWarningShown = false;
 
     async function init() {
         loadPreferences();
@@ -159,6 +167,7 @@
                 await loadDocument(doc, { focus: true, announce: true });
             }
         }
+        await maybeRestoreRecoveryDraft();
         el.editor.focus();
         placeCaretAtStart();
     }
@@ -252,9 +261,12 @@
 
         el.findInput.addEventListener("input", () => refreshFind(false));
         el.findInput.addEventListener("keydown", handleFindKeydown);
+        el.findReplaceInput.addEventListener("keydown", handleReplaceKeydown);
         $("#findPrev").addEventListener("click", () => findStep(-1));
         $("#findNext").addEventListener("click", () => findStep(1));
         $("#findClose").addEventListener("click", closeFind);
+        $("#replaceOne").addEventListener("click", replaceCurrent);
+        $("#replaceAll").addEventListener("click", replaceAll);
 
         window.addEventListener("dragenter", handleDragEnter);
         window.addEventListener("dragleave", handleDragLeave);
@@ -664,6 +676,7 @@
         scheduleOutlineRefresh();
         scheduleHistoryCommit();
         scheduleSourceSync();
+        scheduleRecoveryDraft();
         if (!state.dirty) {
             setDirty(true);
         }
@@ -800,6 +813,89 @@
         updateDocumentMeta();
         if (changed || force) {
             call("SetDirty", state.dirty).catch(() => {});
+        }
+        if (state.dirty) {
+            scheduleRecoveryDraft();
+        }
+    }
+
+    async function maybeRestoreRecoveryDraft() {
+        const draft = await safeCall("LoadRecoveryDraft");
+        if (!draft) {
+            return;
+        }
+        const savedAt = new Date(draft.savedAt);
+        const when = Number.isNaN(savedAt.getTime()) ? "上次会话" : savedAt.toLocaleString("zh-CN");
+        const action = await showModal({
+            title: "恢复未保存的草稿？",
+            message: `发现“${draft.name || "未命名.md"}”在 ${when} 的未保存内容。恢复后会继续保留原文件，直到你再次保存。`,
+            buttons: [
+                { label: "丢弃草稿", value: "discard", kind: "danger" },
+                { label: "恢复", value: "restore", kind: "primary" },
+            ],
+        });
+        if (action !== "restore") {
+            await clearRecoveryDraft();
+            return;
+        }
+
+        await loadDocument(
+            { path: draft.path || "", name: draft.name || "未命名.md", content: draft.content || "" },
+            { focus: false, announce: false }
+        );
+        state.savedContent = draft.baseContent || "";
+        syncSourceNow();
+        const dirty = state.source !== state.savedContent;
+        setDirty(dirty, true);
+        if (dirty) {
+            scheduleRecoveryDraft();
+        } else {
+            await clearRecoveryDraft();
+        }
+        toast("已恢复未保存的草稿", "success");
+    }
+
+    function scheduleRecoveryDraft() {
+        if (!state.dirty) {
+            return;
+        }
+        window.clearTimeout(recoveryTimer);
+        recoveryTimer = window.setTimeout(() => {
+            persistRecoveryDraft().catch(() => {});
+        }, 1800);
+    }
+
+    async function persistRecoveryDraft() {
+        if (!state.dirty) {
+            return;
+        }
+        const content = syncSourceNow();
+        if (!state.dirty) {
+            await clearRecoveryDraft();
+            return;
+        }
+        const key = [state.path, state.name, state.savedContent, content].join("\u0000");
+        if (key === recoverySavedKey) {
+            return;
+        }
+        try {
+            await call("SaveRecoveryDraft", state.path, state.name, content, state.savedContent);
+            recoverySavedKey = key;
+        } catch (error) {
+            if (!recoveryWarningShown) {
+                recoveryWarningShown = true;
+                toast(`无法写入恢复草稿：${errorText(error)}`, "error");
+            }
+        }
+    }
+
+    async function clearRecoveryDraft() {
+        window.clearTimeout(recoveryTimer);
+        recoverySavedKey = "";
+        try {
+            await call("ClearRecoveryDraft");
+        } catch (error) {
+            // A missing recovery file should never block normal document work.
         }
     }
 
@@ -1457,6 +1553,7 @@
         updateStats();
         refreshOutline();
         syncSourceNow();
+        scheduleRecoveryDraft();
         scheduledSelectionUpdate();
         el.editor.focus();
     }
@@ -1725,9 +1822,14 @@
         if (!clipboard) {
             return;
         }
+        const range = captureRange();
+        const imageFiles = clipboardImageFiles(clipboard);
+        if (imageFiles.length) {
+            await insertPastedImages(imageFiles, range);
+            return;
+        }
         const html = clipboard.getData("text/html");
         const text = clipboard.getData("text/plain");
-        const range = captureRange();
 
         if (html) {
             recordHistory();
@@ -1755,6 +1857,95 @@
         recordHistory();
         insertHTMLAtRange(textToHTML(text), range);
         afterMutation();
+    }
+
+    function clipboardImageFiles(clipboard) {
+        const files = [];
+        if (clipboard.items) {
+            for (const item of Array.from(clipboard.items)) {
+                if (item.kind !== "file" || !String(item.type).startsWith("image/")) {
+                    continue;
+                }
+                const file = item.getAsFile();
+                if (file) {
+                    files.push(file);
+                }
+            }
+        }
+        if (!files.length && clipboard.files) {
+            for (const file of Array.from(clipboard.files)) {
+                if (String(file.type).startsWith("image/")) {
+                    files.push(file);
+                }
+            }
+        }
+        return files;
+    }
+
+    async function insertPastedImages(files, range) {
+        if (!state.path) {
+            const saved = await saveDocument(true);
+            if (!saved) {
+                toast("粘贴图片前需要先保存文档", "info");
+                return;
+            }
+        }
+
+        const savedImages = [];
+        for (const file of files) {
+            if (file.size > 20 * 1024 * 1024) {
+                toast(`${file.name || "图片"} 超过 20 MB，已跳过`, "error");
+                continue;
+            }
+            try {
+                const dataURL = await readFileAsDataURL(file);
+                const saved = await call("SavePastedImage", dataURL);
+                if (saved?.relativePath) {
+                    savedImages.push({ ...saved, name: file.name || "粘贴图片" });
+                }
+            } catch (error) {
+                toast(`图片保存失败：${errorText(error)}`, "error");
+            }
+        }
+        if (!savedImages.length) {
+            return;
+        }
+
+        recordHistory();
+        if (range) {
+            restoreRange(range);
+        }
+        const selection = window.getSelection();
+        if (!selection || !selection.rangeCount) {
+            return;
+        }
+        const targetRange = selection.getRangeAt(0);
+        targetRange.deleteContents();
+        for (const saved of savedImages) {
+            const image = document.createElement("img");
+            image.alt = saved.name;
+            image.dataset.mdSrc = saved.relativePath;
+            image.src = localFileURL(saved.relativePath);
+            image.contentEditable = "false";
+            image.draggable = false;
+            targetRange.insertNode(image);
+            targetRange.setStartAfter(image);
+            targetRange.collapse(true);
+        }
+        selection.removeAllRanges();
+        selection.addRange(targetRange);
+        el.editor.focus();
+        afterMutation();
+        toast(`已插入 ${savedImages.length} 张图片`, "success");
+    }
+
+    function readFileAsDataURL(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(reader.error || new Error("无法读取剪贴板图片"));
+            reader.readAsDataURL(file);
+        });
     }
 
     function insertHTMLAtRange(html, range) {
@@ -2013,6 +2204,9 @@
         } else if (key === "f") {
             event.preventDefault();
             openFind();
+        } else if (key === "h") {
+            event.preventDefault();
+            openFind(true);
         } else if (key === "\\") {
             event.preventDefault();
             setSidebar(!state.sidebar);
@@ -2034,16 +2228,21 @@
         toast(`正文字号 ${next}px`, "info");
     }
 
-    function openFind() {
+    function openFind(focusReplace = false) {
         el.findBar.hidden = false;
         const selection = window.getSelection();
         const selected = selection ? selection.toString() : "";
         if (selected && !selected.includes("\n")) {
             el.findInput.value = selected;
         }
-        el.findInput.focus();
-        el.findInput.select();
         refreshFind(false);
+        if (focusReplace) {
+            el.findReplaceInput.focus();
+            el.findReplaceInput.select();
+        } else {
+            el.findInput.focus();
+            el.findInput.select();
+        }
     }
 
     function closeFind() {
@@ -2055,6 +2254,20 @@
         if (event.key === "Enter") {
             event.preventDefault();
             findStep(event.shiftKey ? -1 : 1);
+        } else if (event.key === "Escape") {
+            event.preventDefault();
+            closeFind();
+        }
+    }
+
+    function handleReplaceKeydown(event) {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            if (event.ctrlKey || event.metaKey) {
+                replaceAll();
+            } else {
+                replaceCurrent();
+            }
         } else if (event.key === "Escape") {
             event.preventDefault();
             closeFind();
@@ -2090,16 +2303,7 @@
             el.findCount.textContent = "0 / 0";
             return;
         }
-        const needle = query.toLowerCase();
-        const matches = [];
-        for (const node of collectTextNodes()) {
-            const text = node.nodeValue.toLowerCase();
-            let position = 0;
-            while ((position = text.indexOf(needle, position)) !== -1) {
-                matches.push({ node, start: position, end: position + query.length });
-                position += Math.max(1, needle.length);
-            }
-        }
+        const matches = editorSearch.findMatches(collectTextNodes(), query);
         state.findMatches = matches;
         if (!preserveIndex || state.findIndex < 0 || state.findIndex >= matches.length) {
             state.findIndex = 0;
@@ -2137,6 +2341,68 @@
         }
     }
 
+    function replaceCurrent() {
+        const query = el.findInput.value;
+        if (!query) {
+            return;
+        }
+        if (state.findQuery !== query || !state.findMatches.length) {
+            refreshFind(true);
+        }
+        if (!state.findMatches.length) {
+            toast("没有可替换的匹配", "info");
+            return;
+        }
+        const replacement = el.findReplaceInput.value;
+        if (replacement === query) {
+            toast("替换内容与查找内容相同", "info");
+            return;
+        }
+        const index = Math.max(0, Math.min(state.findIndex, state.findMatches.length - 1));
+        recordHistory();
+        if (!editorSearch.replaceMatch(state.findMatches[index], replacement)) {
+            refreshFind(false);
+            return;
+        }
+        afterMutation();
+        refreshFind(true);
+        if (state.findMatches.length) {
+            state.findIndex = Math.min(index, state.findMatches.length - 1);
+            findStep(0);
+            el.findReplaceInput.focus();
+        } else {
+            el.findCount.textContent = "0 / 0";
+            el.findReplaceInput.focus();
+        }
+    }
+
+    function replaceAll() {
+        const query = el.findInput.value;
+        if (!query) {
+            return;
+        }
+        refreshFind(false);
+        if (!state.findMatches.length) {
+            toast("没有可替换的匹配", "info");
+            return;
+        }
+        const replacement = el.findReplaceInput.value;
+        if (replacement === query) {
+            toast("替换内容与查找内容相同", "info");
+            return;
+        }
+        const matches = state.findMatches.slice();
+        recordHistory();
+        const replaced = editorSearch.replaceMatches(matches, replacement);
+        if (!replaced) {
+            return;
+        }
+        afterMutation();
+        refreshFind(false);
+        el.findReplaceInput.focus();
+        toast(`已替换 ${replaced} 处`, "success");
+    }
+
     async function openDocument() {
         if (!(await confirmUnsaved())) {
             return;
@@ -2144,6 +2410,7 @@
         const doc = await safeCall("OpenFileDialog");
         if (doc) {
             await loadDocument(doc, { focus: true, announce: true });
+            await clearRecoveryDraft();
         }
     }
 
@@ -2157,6 +2424,7 @@
         const doc = await safeCall("OpenPath", paths[0]);
         if (doc) {
             await loadDocument(doc, { focus: true, announce: true });
+            await clearRecoveryDraft();
         }
     }
 
@@ -2171,6 +2439,7 @@
         state.path = result.path || state.path;
         state.name = result.name || state.name;
         state.savedContent = contentAtSave;
+        await clearRecoveryDraft();
         postProcessEditor();
         syncSourceNow();
         updateDocumentMeta();
@@ -2188,6 +2457,7 @@
             { path: "", name: "未命名.md", content: "", size: 0 },
             { focus: true, announce: false }
         );
+        await clearRecoveryDraft();
     }
 
     async function confirmUnsaved() {
@@ -2217,6 +2487,9 @@
             await safeCall("CancelQuit");
             return;
         }
+        if (state.dirty) {
+            await persistRecoveryDraft();
+        }
         state.closePromptOpen = true;
         const action = await showModal({
             title: "退出 Mdmuder？",
@@ -2230,6 +2503,7 @@
         state.closePromptOpen = false;
 
         if (action === "discard") {
+            await clearRecoveryDraft();
             await safeCall("QuitApp");
         } else if (action === "save") {
             const saved = await saveDocument(false);
@@ -2429,6 +2703,7 @@
                 "斜体              Ctrl+I",
                 "插入链接          Ctrl+K",
                 "查找              Ctrl+F",
+                "查找与替换        Ctrl+H",
                 "显示/隐藏大纲     Ctrl+\\",
                 "调整字号          Ctrl+加号 / Ctrl+减号",
             ].join("\n"),
@@ -2439,7 +2714,7 @@
 
     function showAbout() {
         showModal({
-            title: "Mdmuder 0.1.0",
+            title: "Mdmuder 0.2.0",
             message: [
                 "一个面向 Windows 的 Markdown 编辑器。",
                 "",
