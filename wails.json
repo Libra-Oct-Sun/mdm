@@ -1,0 +1,16 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Mdmuder",
+  "outputfilename": "Mdmuder",
+  "wailsjsdir": "./frontend",
+  "author": {
+    "name": "Mdmuder"
+  },
+  "info": {
+    "companyName": "Mdmuder",
+    "productName": "Mdmuder",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © 2026 Mdmuder",
+    "comments": "A focused Markdown editor for Windows"
+  }
+}

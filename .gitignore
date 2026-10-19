@@ -1,0 +1,23 @@
+# Wails output
+build/bin
+build/windows/installer/wails_tools.nsh
+build/windows/installer/tmp/
+
+# Local build cache used by sandboxed Go builds
+.gocache/
+.gomodcache/
+
+# Local browser / WebView profiles created during smoke tests
+.edge-profile*/
+.webview/
+
+# IDEs
+.idea
+.vscode
+
+# Dependency directories
+node_modules
+
+# Temporary files
+*.tmp
+*.log

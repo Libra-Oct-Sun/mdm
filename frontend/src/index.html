@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Mdmuder</title>
+    <script>
+        try {
+            const savedTheme = localStorage.getItem("mdmuder.theme");
+            const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+            if (savedTheme === "dark" || (!savedTheme && prefersDark)) {
+                document.documentElement.dataset.theme = "dark";
+            }
+        } catch (error) {
+            // localStorage can be unavailable in locked-down webviews.
+        }
+    </script>
+    <link href="/main.css" rel="stylesheet"/>
+</head>
+<body>
+<div class="app" id="app">
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-mark" aria-hidden="true">
+                <span>M</span>
+                <i></i>
+            </div>
+            <div class="doc-identity" id="docIdentity" title="未命名.md">
+                <div class="doc-title-line">
+                    <span id="docTitle">未命名.md</span>
+                    <span class="dirty-dot" id="dirtyDot" hidden></span>
+                </div>
+                <div class="doc-subtitle" id="docPath">本地草稿，尚未保存</div>
+            </div>
+        </div>
+
+        <div class="top-actions">
+            <button class="icon-btn" id="btnSidebar" title="大纲 (Ctrl+\)" aria-label="切换大纲"
+                    aria-pressed="true" aria-controls="outline">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <rect x="2.5" y="3.5" width="15" height="13" rx="2"></rect>
+                    <path d="M7.5 3.5v13"></path>
+                    <path d="M4.7 6.5h.9M4.7 9h.9M4.7 11.5h.9"></path>
+                </svg>
+            </button>
+            <button class="ghost-btn" id="btnOpen" title="打开 (Ctrl+O)">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M2.5 6.5a2 2 0 0 1 2-2h3l1.5 2h6.5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2z"></path>
+                </svg>
+                <span>打开</span>
+            </button>
+            <button class="primary-btn" id="btnSave" title="保存 (Ctrl+S)">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M4 3.5h9l3 3v10H4z"></path>
+                    <path d="M6.5 3.5v4h6v-4M6.5 16.5v-5h7v5"></path>
+                </svg>
+                <span>保存</span>
+            </button>
+            <button class="icon-btn" id="btnTheme" title="切换主题" aria-label="切换主题">
+                <svg class="theme-icon theme-sun" viewBox="0 0 20 20" aria-hidden="true">
+                    <circle cx="10" cy="10" r="3.4"></circle>
+                    <path d="M10 2.2v2.1M10 15.7v2.1M2.2 10h2.1M15.7 10h2.1M4.5 4.5l1.5 1.5M14 14l1.5 1.5M15.5 4.5L14 6M6 14l-1.5 1.5"></path>
+                </svg>
+                <svg class="theme-icon theme-moon" viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M15.8 12.7A6.1 6.1 0 0 1 7.3 4.2a6.1 6.1 0 1 0 8.5 8.5z"></path>
+                </svg>
+            </button>
+            <div class="more-wrap">
+                <button class="icon-btn" id="btnMore" title="更多" aria-label="更多" aria-expanded="false"
+                        aria-haspopup="true">
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                        <circle cx="4.5" cy="10" r="1"></circle>
+                        <circle cx="10" cy="10" r="1"></circle>
+                        <circle cx="15.5" cy="10" r="1"></circle>
+                    </svg>
+                </button>
+                <div class="more-menu" id="moreMenu" hidden>
+                    <button data-command="new"><span>新建文档</span><kbd>Ctrl N</kbd></button>
+                    <button data-command="open"><span>打开文件</span><kbd>Ctrl O</kbd></button>
+                    <button data-command="save-as"><span>另存为</span><kbd>Ctrl ⇧ S</kbd></button>
+                    <div class="menu-separator"></div>
+                    <button data-command="insert-table"><span>插入表格</span></button>
+                    <button data-command="insert-hr"><span>插入分隔线</span></button>
+                    <button data-command="find"><span>查找</span><kbd>Ctrl F</kbd></button>
+                    <div class="menu-separator"></div>
+                    <button data-command="font-smaller"><span>缩小字号</span><kbd>Ctrl −</kbd></button>
+                    <button data-command="font-larger"><span>放大字号</span><kbd>Ctrl +</kbd></button>
+                    <button data-command="font-reset"><span>重置字号</span></button>
+                    <div class="menu-separator"></div>
+                    <button data-command="shortcuts"><span>键盘快捷键</span></button>
+                    <button data-command="about"><span>关于 Mdmuder</span></button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="formatbar" aria-label="格式工具栏">
+        <div class="format-group">
+            <button data-command="undo" title="撤销 (Ctrl+Z)" aria-label="撤销">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M7.5 6.5L3.8 10l3.7 3.5"></path>
+                    <path d="M4.4 10h6.2a4 4 0 0 1 4 4v.8"></path>
+                </svg>
+            </button>
+            <button data-command="redo" title="重做 (Ctrl+Y)" aria-label="重做">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M12.5 6.5L16.2 10l-3.7 3.5"></path>
+                    <path d="M15.6 10H9.4a4 4 0 0 0-4 4v.8"></path>
+                </svg>
+            </button>
+        </div>
+        <span class="format-sep"></span>
+        <div class="format-group heading-group">
+            <button data-command="h1" title="一级标题">H1</button>
+            <button data-command="h2" title="二级标题">H2</button>
+            <button data-command="h3" title="三级标题">H3</button>
+        </div>
+        <span class="format-sep"></span>
+        <div class="format-group">
+            <button data-command="bold" title="粗体 (Ctrl+B)"><strong>B</strong></button>
+            <button data-command="italic" title="斜体 (Ctrl+I)"><em>I</em></button>
+            <button data-command="strike" title="删除线"><span class="strike-glyph">S</span></button>
+            <button data-command="inline-code" title="行内代码"><span class="code-glyph">&lt;/&gt;</span></button>
+            <button data-command="link" title="插入链接 (Ctrl+K)" aria-label="插入链接">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M8.2 11.8l3.6-3.6"></path>
+                    <path d="M7.1 12.9l-1 1a2.7 2.7 0 0 1-3.8-3.8l2.3-2.3a2.7 2.7 0 0 1 3.8 0"></path>
+                    <path d="M12.9 7.1l1-1a2.7 2.7 0 0 1 3.8 3.8l-2.3 2.3a2.7 2.7 0 0 1-3.8 0"></path>
+                </svg>
+            </button>
+            <button data-command="image" title="插入图片" aria-label="插入图片">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <rect x="2.7" y="3.7" width="14.6" height="12.6" rx="2"></rect>
+                    <circle cx="7" cy="7.7" r="1.2"></circle>
+                    <path d="M4.2 14.2l4-4 2.6 2.5 2-2 3 3.5"></path>
+                </svg>
+            </button>
+        </div>
+        <span class="format-sep"></span>
+        <div class="format-group">
+            <button data-command="quote" title="引用" aria-label="引用">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M4 6.2h4v4H5.7c0 1.8.9 2.9 2.3 3.7M11.5 6.2h4v4H13c0 1.8.9 2.9 2.3 3.7"></path>
+                </svg>
+            </button>
+            <button data-command="ul" title="无序列表" aria-label="无序列表">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <circle cx="4.4" cy="5.8" r=".9"></circle>
+                    <circle cx="4.4" cy="10" r=".9"></circle>
+                    <circle cx="4.4" cy="14.2" r=".9"></circle>
+                    <path d="M7.3 5.8h8.3M7.3 10h8.3M7.3 14.2h8.3"></path>
+                </svg>
+            </button>
+            <button data-command="ol" title="有序列表" aria-label="有序列表">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M3.4 5.2h1v3.1M3.3 11.3c.3-.4.8-.7 1.3-.7.6 0 1.1.4 1.1 1 0 1-1.2 1.4-2.4 3.1h2.5"></path>
+                    <path d="M8.3 6.1h7.3M8.3 10h7.3M8.3 13.9h7.3"></path>
+                </svg>
+            </button>
+            <button data-command="task" title="任务列表" aria-label="任务列表">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <rect x="3.3" y="4.3" width="5.4" height="5.4" rx="1"></rect>
+                    <path d="M4.6 7l1 1 1.7-2"></path>
+                    <path d="M11.2 7h4.6M11.2 13.5h4.6"></path>
+                    <rect x="3.3" y="10.8" width="5.4" height="5.4" rx="1"></rect>
+                </svg>
+            </button>
+            <button data-command="code-block" title="代码块" aria-label="代码块">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M7.2 5.8L3.3 10l3.9 4.2M12.8 5.8l3.9 4.2-3.9 4.2M11.2 3.8l-2.4 12.4"></path>
+                </svg>
+            </button>
+            <button data-command="insert-table" title="插入表格" aria-label="插入表格">
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <rect x="2.8" y="3.7" width="14.4" height="12.6" rx="1.5"></rect>
+                    <path d="M2.8 8h14.4M7.6 8v8.3M12.4 8v8.3M7.6 3.7v4.3M12.4 3.7v4.3"></path>
+                </svg>
+            </button>
+            <button data-command="insert-hr" title="分隔线" aria-label="插入分隔线">
+                <span class="hr-glyph">—</span>
+            </button>
+        </div>
+        <div class="format-spacer"></div>
+        <button class="quick-find" id="btnFind" title="查找 (Ctrl+F)">
+            查找 <kbd>Ctrl F</kbd>
+        </button>
+    </div>
+
+    <main class="workspace" id="workspace">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>大纲</h2>
+                <button class="mini-btn" id="btnSidebarClose" title="隐藏大纲" aria-label="隐藏大纲">
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                        <path d="M12.5 5.5L8 10l4.5 4.5"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="outline" id="outline" role="navigation" aria-label="文档大纲"></div>
+            <div class="sidebar-footer">
+                <div class="stat-row"><span>字数</span><strong id="sidebarWords">0</strong></div>
+                <div class="stat-row"><span>行数</span><strong id="sidebarLines">1</strong></div>
+                <div class="stat-row"><span>阅读时间</span><strong id="sidebarReading">1 分钟</strong></div>
+            </div>
+        </aside>
+
+        <section class="pane editor-pane" id="editorPane">
+            <div class="writing-scroll" id="editorScroll">
+                <div class="writing-column">
+                    <div class="editor-surface markdown-body"
+                         id="editor"
+                         contenteditable="true"
+                         role="textbox"
+                         aria-multiline="true"
+                         aria-label="Markdown 文档编辑器"
+                         spellcheck="false"
+                         data-placeholder="开始写作……"></div>
+                </div>
+            </div>
+            <div class="find-bar" id="findBar" hidden>
+                <input id="findInput" type="text" placeholder="查找内容" aria-label="查找内容"
+                       autocomplete="off" spellcheck="false"/>
+                <span id="findCount">0 / 0</span>
+                <button class="mini-btn" id="findPrev" title="上一个" aria-label="上一个">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 12.5L10 7l5 5.5"></path></svg>
+                </button>
+                <button class="mini-btn" id="findNext" title="下一个" aria-label="下一个">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 7.5L10 13l5-5.5"></path></svg>
+                </button>
+                <button class="mini-btn" id="findClose" title="关闭" aria-label="关闭查找">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"></path></svg>
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <footer class="statusbar">
+        <div class="status-left">
+            <span id="statusSaved" role="status" aria-live="polite">已保存</span>
+            <span class="status-sep"></span>
+            <span id="statusPath">本地草稿</span>
+        </div>
+        <div class="status-right">
+            <span id="statusBlock">段落</span>
+            <span class="status-sep"></span>
+            <span id="statusStats">字数 0，共 1 行</span>
+            <span class="status-sep"></span>
+            <span>UTF-8</span>
+            <span class="status-sep"></span>
+            <span>Markdown</span>
+        </div>
+    </footer>
+
+    <div class="drop-overlay" id="dropOverlay">
+        <div class="drop-card">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 16V4M7.5 8.5L12 4l4.5 4.5"></path>
+                <path d="M4 15.5v3A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-3"></path>
+            </svg>
+            <strong>松开以打开 Markdown 文件</strong>
+            <span>当前未保存的内容会先询问是否保存</span>
+        </div>
+    </div>
+
+    <div class="toast-host" id="toastHost" aria-live="polite"></div>
+
+    <div class="modal-backdrop" id="modalBackdrop" hidden>
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+            <div class="modal-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 8.5v5M12 16.9v.1"></path>
+                    <path d="M10.3 3.8L2.6 17.1A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.9L13.7 3.8a2 2 0 0 0-3.4 0z"></path>
+                </svg>
+            </div>
+            <h2 id="modalTitle">保存更改？</h2>
+            <p id="modalMessage"></p>
+            <div class="modal-actions" id="modalActions"></div>
+        </div>
+    </div>
+</div>
+<script src="/main.js"></script>
+</body>
+</html>
