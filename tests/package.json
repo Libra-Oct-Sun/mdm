@@ -1,0 +1,11 @@
+{
+  "name": "mdmuder-frontend-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test serializer.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}
