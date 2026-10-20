@@ -5,6 +5,8 @@ All notable user-facing changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-20
+
 ### Added
 
 - Document tabs can now be reordered by dragging, with `Alt+Left/Right`

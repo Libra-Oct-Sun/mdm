@@ -4202,7 +4202,7 @@
 
     function showAbout() {
         showModal({
-            title: "Mdmuder 0.3.0",
+            title: "Mdmuder 0.4.0",
             message: [
                 "一个面向 Windows 的 Markdown 编辑器。",
                 "",
