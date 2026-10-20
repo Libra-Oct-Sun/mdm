@@ -5,6 +5,8 @@ All notable user-facing changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-20
+
 ### Added
 
 - Multiple documents now open in tabs, with per-tab buffers, unsaved state and
