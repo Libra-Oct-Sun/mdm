@@ -12,6 +12,7 @@ Markdown 标记只在后台生成和保存，不占用编辑视图。
 - GFM 表格、任务列表、删除线、自动链接，以及脚注和中文排版优化
 - 富表格：合并/拆分单元格、单元格内多段落、行列增删、`Tab` 单元格导航
 - 简单表格保存为 GFM 管道表；含合并单元格或块级内容时保存为安全 HTML 表格
+- 多文档标签支持拖动排序，并可用 `Alt+←/→` 键盘移动
 - 标题大纲导航，点击即可跳转到正文对应位置
 - 多标签页并行编辑，文件打开、保存、另存为、拖放打开
 - 支持通过命令行直接打开文件（`Mdmuder.exe 文章.md`）
@@ -50,20 +51,14 @@ wails dev
 如果只想运行快速检查，可以使用 `.\scripts\test.ps1 -SkipBuild`。
 需要同时验证安装包时，使用 `.\scripts\test.ps1 -Installer`。
 
-构建 Windows 可执行文件：
-
-```powershell
-wails build -clean
-```
-
-产物位于 `build/bin/Mdmuder.exe`。
-带 NSIS 的构建会生成安装包 `build/bin/Mdmuder-amd64-installer.exe`。
-
 构建带文件关联的用户级安装包（需要 NSIS）：
 
 ```powershell
 wails build -clean -nsis -installscope user
 ```
+
+产物位于 `build/bin/Mdmuder-amd64-installer.exe`。本地交付只保留安装包；
+构建过程中临时生成的 `build/bin/Mdmuder.exe` 可以删除。
 
 安装包会注册 `.md`、`.markdown` 和 `.mdown` 文件关联。
 
@@ -89,6 +84,7 @@ Release，并附加可执行文件、ZIP 包和 SHA-256 校验文件。
 | `Ctrl+Shift+S` | 另存为 |
 | `Ctrl+W` | 关闭当前标签 |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | 切换标签 |
+| 标签聚焦时 `Alt+←/→` | 左右移动当前标签 |
 | `Ctrl+B` | 粗体 |
 | `Ctrl+I` | 斜体 |
 | `Ctrl+K` | 插入链接 |

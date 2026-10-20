@@ -157,6 +157,8 @@
     let selectionFrame = 0;
     let scrollFrame = 0;
     let dragDepth = 0;
+    let draggedTabId = "";
+    let tabDropTarget = null;
     let selectedImage = null;
     let contextAnchor = null;
     let contextReturnRange = null;
@@ -256,6 +258,10 @@
             }
         });
         el.tabList.addEventListener("keydown", handleTabStripKeydown);
+        el.tabList.addEventListener("dragstart", handleTabDragStart);
+        el.tabList.addEventListener("dragover", handleTabDragOver);
+        el.tabList.addEventListener("drop", handleTabDrop);
+        el.tabList.addEventListener("dragend", handleTabDragEnd);
 
         el.btnMore.addEventListener("click", (event) => {
             event.stopPropagation();
@@ -509,6 +515,7 @@
             const item = document.createElement("div");
             item.className = "tab";
             item.classList.toggle("is-active", tab.id === activeTabId);
+            item.dataset.tabItemId = tab.id;
 
             const button = document.createElement("button");
             button.type = "button";
@@ -519,12 +526,17 @@
             button.setAttribute("aria-selected", String(tab.id === activeTabId));
             button.setAttribute("aria-controls", "editorPane");
             button.tabIndex = tab.id === activeTabId ? 0 : -1;
-            button.title = tab.path || tab.name;
+            button.title = `${tab.path || tab.name}（拖动排序，Alt+←/→ 移动）`;
+            button.draggable = true;
 
             const title = document.createElement("span");
             title.className = "tab-title";
             title.textContent = tab.name;
-            button.append(title);
+            const grip = document.createElement("span");
+            grip.className = "tab-grip";
+            grip.textContent = "⋮⋮";
+            grip.setAttribute("aria-hidden", "true");
+            button.append(grip, title);
 
             if (tab.dirty) {
                 const dirty = document.createElement("span");
@@ -685,6 +697,14 @@
         if (!currentButton) {
             return;
         }
+        if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+            event.preventDefault();
+            moveTabByOffset(
+                currentButton.dataset.tabId,
+                event.key === "ArrowRight" ? 1 : -1,
+            );
+            return;
+        }
         if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
             event.preventDefault();
             const index = tabs.findIndex((tab) => tab.id === currentButton.dataset.tabId);
@@ -700,6 +720,120 @@
             event.preventDefault();
             closeTab(currentButton.dataset.tabId);
         }
+    }
+
+    function handleTabDragStart(event) {
+        const button = event.target.closest?.(".tab-main");
+        if (!button?.dataset.tabId) {
+            return;
+        }
+        draggedTabId = button.dataset.tabId;
+        tabDropTarget = null;
+        button.closest(".tab")?.classList.add("is-dragging");
+        if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("application/x-mdmuder-tab", draggedTabId);
+            event.dataTransfer.setData("text/plain", draggedTabId);
+        }
+    }
+
+    function handleTabDragOver(event) {
+        if (!draggedTabId) {
+            return;
+        }
+        event.preventDefault();
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = "move";
+        }
+        clearTabDropIndicator();
+        const item = event.target.closest?.(".tab");
+        if (!item) {
+            tabDropTarget = { id: "", after: true };
+            return;
+        }
+        const targetId = item.querySelector(".tab-main")?.dataset.tabId;
+        if (!targetId || targetId === draggedTabId) {
+            tabDropTarget = null;
+            return;
+        }
+        const rect = item.getBoundingClientRect();
+        const after = event.clientX >= rect.left + rect.width / 2;
+        tabDropTarget = { id: targetId, after };
+        item.classList.add(after ? "drop-after" : "drop-before");
+    }
+
+    function handleTabDrop(event) {
+        if (!draggedTabId) {
+            return;
+        }
+        event.preventDefault();
+        const draggedId = draggedTabId;
+        const target = tabDropTarget;
+        cleanupTabDrag();
+        if (target) {
+            reorderTab(draggedId, target.id, target.after);
+        }
+    }
+
+    function handleTabDragEnd() {
+        cleanupTabDrag();
+    }
+
+    function clearTabDropIndicator() {
+        el.tabList.querySelectorAll(".tab.drop-before, .tab.drop-after").forEach((item) => {
+            item.classList.remove("drop-before", "drop-after");
+        });
+    }
+
+    function cleanupTabDrag() {
+        el.tabList.querySelectorAll(".tab.is-dragging").forEach((item) => {
+            item.classList.remove("is-dragging");
+        });
+        clearTabDropIndicator();
+        draggedTabId = "";
+        tabDropTarget = null;
+    }
+
+    function focusTabButton(tabId) {
+        el.tabList.querySelector(`.tab-main[data-tab-id="${tabId}"]`)?.focus();
+    }
+
+    function reorderTab(draggedId, targetId, after) {
+        const fromIndex = tabs.findIndex((tab) => tab.id === draggedId);
+        if (fromIndex === -1) {
+            return;
+        }
+        const [moved] = tabs.splice(fromIndex, 1);
+        let insertIndex = targetId
+            ? tabs.findIndex((tab) => tab.id === targetId)
+            : tabs.length;
+        if (insertIndex === -1) {
+            insertIndex = tabs.length;
+        } else if (after) {
+            insertIndex += 1;
+        }
+        insertIndex = Math.max(0, Math.min(insertIndex, tabs.length));
+        if (insertIndex === fromIndex) {
+            tabs.splice(fromIndex, 0, moved);
+            focusTabButton(moved.id);
+            return;
+        }
+        tabs.splice(insertIndex, 0, moved);
+        renderTabs(true);
+        focusTabButton(moved.id);
+    }
+
+    function moveTabByOffset(tabId, offset) {
+        const index = tabs.findIndex((tab) => tab.id === tabId);
+        const targetIndex = index + offset;
+        if (index === -1 || targetIndex < 0 || targetIndex >= tabs.length) {
+            focusTabButton(tabId);
+            return;
+        }
+        const [moved] = tabs.splice(index, 1);
+        tabs.splice(targetIndex, 0, moved);
+        renderTabs(true);
+        focusTabButton(moved.id);
     }
 
     async function loadDocument(doc, options = {}, targetTab = activeTab()) {

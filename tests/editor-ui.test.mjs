@@ -1039,3 +1039,110 @@ test("pasting an HTML table preserves merged cells and paragraphs", async () => 
     );
     dom.window.close();
 });
+
+test("document tabs can be reordered by dragging", async () => {
+    const firstPath = "C:\\notes\\first.md";
+    const secondPath = "C:\\notes\\second.md";
+    const thirdPath = "C:\\notes\\third.md";
+    const { dom } = await bootEditor({
+        startup: firstPath,
+        documents: {
+            [firstPath]: { path: firstPath, name: "first.md", content: "# first", size: 7 },
+            [secondPath]: { path: secondPath, name: "second.md", content: "# second", size: 8 },
+            [thirdPath]: { path: thirdPath, name: "third.md", content: "# third", size: 7 },
+        },
+        openDialogs: [
+            { path: secondPath, name: "second.md", content: "# second", size: 8 },
+            { path: thirdPath, name: "third.md", content: "# third", size: 7 },
+        ],
+    });
+    const document = dom.window.document;
+    const editor = document.querySelector("#editor");
+    const titles = () => Array.from(document.querySelectorAll("#tabList .tab-title"))
+        .map((item) => item.textContent);
+    const openNext = () => document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+        key: "o",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+    }));
+
+    openNext();
+    await waitFor(() => document.querySelectorAll("#tabList .tab").length === 2, "second tab");
+    openNext();
+    await waitFor(() => document.querySelectorAll("#tabList .tab").length === 3, "third tab");
+    assert.deepEqual(titles(), ["first.md", "second.md", "third.md"]);
+
+    const firstTab = document.querySelector("#tabList .tab");
+    const firstButton = firstTab.querySelector(".tab-main");
+    const lastTab = document.querySelector("#tabList .tab:last-child");
+    const dataTransfer = {
+        effectAllowed: "",
+        dropEffect: "",
+        setData() {},
+        getData() {
+            return "";
+        },
+    };
+    const dragStart = new dom.window.Event("dragstart", { bubbles: true, cancelable: true });
+    Object.defineProperty(dragStart, "dataTransfer", { value: dataTransfer });
+    firstButton.dispatchEvent(dragStart);
+
+    const dragOver = new dom.window.Event("dragover", { bubbles: true, cancelable: true });
+    Object.defineProperty(dragOver, "dataTransfer", { value: dataTransfer });
+    Object.defineProperty(dragOver, "clientX", { value: 1000 });
+    lastTab.dispatchEvent(dragOver);
+    lastTab.dispatchEvent(new dom.window.Event("drop", { bubbles: true, cancelable: true }));
+
+    assert.deepEqual(titles(), ["second.md", "third.md", "first.md"]);
+    assert.match(document.querySelector(".tab.is-active .tab-title").textContent, /third\.md/);
+    assert.match(editor.textContent, /# third/);
+    dom.window.close();
+});
+
+test("Alt+Arrow reorders the focused document tab", async () => {
+    const firstPath = "C:\\notes\\first.md";
+    const secondPath = "C:\\notes\\second.md";
+    const thirdPath = "C:\\notes\\third.md";
+    const { dom } = await bootEditor({
+        startup: firstPath,
+        documents: {
+            [firstPath]: { path: firstPath, name: "first.md", content: "# first", size: 7 },
+            [secondPath]: { path: secondPath, name: "second.md", content: "# second", size: 8 },
+            [thirdPath]: { path: thirdPath, name: "third.md", content: "# third", size: 7 },
+        },
+        openDialogs: [
+            { path: secondPath, name: "second.md", content: "# second", size: 8 },
+            { path: thirdPath, name: "third.md", content: "# third", size: 7 },
+        ],
+    });
+    const document = dom.window.document;
+    const titles = () => Array.from(document.querySelectorAll("#tabList .tab-title"))
+        .map((item) => item.textContent);
+    const openNext = () => document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+        key: "o",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+    }));
+
+    openNext();
+    await waitFor(() => document.querySelectorAll("#tabList .tab").length === 2, "second tab");
+    openNext();
+    await waitFor(() => document.querySelectorAll("#tabList .tab").length === 3, "third tab");
+
+    const firstButton = document.querySelector("#tabList .tab-main");
+    const firstId = firstButton.dataset.tabId;
+    firstButton.focus();
+    firstButton.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+        key: "ArrowRight",
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+    }));
+
+    await waitFor(() => titles()[0] === "second.md", "keyboard tab reorder");
+    assert.deepEqual(titles(), ["second.md", "first.md", "third.md"]);
+    assert.equal(document.activeElement?.dataset.tabId, firstId);
+    dom.window.close();
+});

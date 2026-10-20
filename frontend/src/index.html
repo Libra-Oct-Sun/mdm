@@ -25,6 +25,7 @@
                 <span>M</span>
                 <i></i>
             </div>
+            <span class="brand-name">Mdmuder</span>
             <div class="doc-identity" id="docIdentity" title="未命名.md">
                 <div class="doc-title-line">
                     <span id="docTitle">未命名.md</span>
@@ -33,6 +34,12 @@
                 <div class="doc-subtitle" id="docPath">本地草稿，尚未保存</div>
             </div>
         </div>
+
+        <button class="command-btn" id="btnFind" title="查找文档 (Ctrl+F)">
+            <span aria-hidden="true">⌕</span>
+            <span>搜索文档</span>
+            <kbd>Ctrl F</kbd>
+        </button>
 
         <div class="top-actions">
             <button class="icon-btn" id="btnSidebar" title="大纲 (Ctrl+\)" aria-label="切换大纲"
@@ -102,6 +109,7 @@
                 <path d="M10 4.5v11M4.5 10h11"></path>
             </svg>
         </button>
+        <div class="tab-hint" aria-hidden="true">拖动排序 · Alt ← →</div>
     </nav>
 
     <div class="formatbar" aria-label="格式工具栏">
@@ -191,9 +199,6 @@
             </button>
         </div>
         <div class="format-spacer"></div>
-        <button class="quick-find" id="btnFind" title="查找 (Ctrl+F)">
-            查找 <kbd>Ctrl F</kbd>
-        </button>
     </div>
 
     <main class="workspace" id="workspace">

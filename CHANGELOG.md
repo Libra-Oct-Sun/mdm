@@ -5,6 +5,14 @@ All notable user-facing changes are documented here. Versions follow
 
 ## [Unreleased]
 
+### Added
+
+- Document tabs can now be reordered by dragging, with `Alt+Left/Right`
+  keyboard reordering when a tab is focused.
+- The editor chrome was redesigned around a compact, tool-like layout: a
+  shorter title bar, quieter tabs, tighter toolbar, narrower outline and a
+  focused 790px writing column.
+
 ## [0.3.0] - 2026-10-20
 
 ### Added
