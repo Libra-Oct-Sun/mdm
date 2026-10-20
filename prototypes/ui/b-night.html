@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<title>Mdmuder · 夜航原型</title>
+<style>
+:root{
+  --bg:#091011;--shell:#0d1617;--pane:#111c1d;--pane-2:#0f1819;
+  --ink:#e4ece6;--muted:#8c9b94;--faint:#53625d;--line:#223234;--line-2:#1a292a;
+  --brass:#c89d58;--brass-soft:rgba(200,157,88,.12);--mint:#7ab7a3;--rose:#d27b68;
+  --sans:"Segoe UI Variable Text","Microsoft YaHei UI","PingFang SC",sans-serif;
+  --serif:"Source Han Serif SC","Noto Serif CJK SC","Songti SC","SimSun",serif;
+  --mono:"Cascadia Code","Sarasa Mono SC",Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:1600px;height:1000px;overflow:hidden}
+body{background:#050b0c;color:var(--ink);font-family:var(--sans)}
+button{font:inherit;color:inherit;background:none;border:0}
+.window{width:1600px;height:1000px;display:flex;flex-direction:column;background:var(--shell);border:1px solid #253435}
+.titlebar{height:52px;display:flex;align-items:center;gap:20px;padding:0 18px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#111c1d,#0d1617)}
+.brand{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;letter-spacing:.02em;min-width:170px}
+.mark{width:25px;height:25px;border:1px solid var(--brass);color:var(--brass);border-radius:4px;display:grid;place-items:center;font-family:var(--serif);font-size:15px}
+.brand small{font-size:9px;color:var(--faint);font-family:var(--mono);letter-spacing:.14em;font-weight:400}
+.search{height:28px;width:300px;display:flex;align-items:center;gap:9px;padding:0 10px;border:1px solid var(--line);border-radius:5px;color:var(--faint);font-size:10.5px;background:#0b1314}
+.search span{margin-left:auto;font-family:var(--mono);font-size:9px;border:1px solid #2a3a3c;padding:2px 5px;border-radius:3px}
+.title-actions{display:flex;align-items:center;gap:15px;margin-left:auto;color:var(--muted);font-family:var(--mono);font-size:10px}
+.title-actions b{color:var(--brass);font-weight:500}
+.topbar{height:43px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid var(--line);background:#0c1516}
+.tab{height:29px;display:flex;align-items:center;gap:8px;padding:0 11px;margin-right:2px;color:var(--muted);font-size:11px;border:1px solid transparent;border-radius:4px}
+.tab.active{color:var(--ink);background:#142122;border-color:#2a3b3c}
+.tab.active .tick{width:3px;height:14px;background:var(--brass);border-radius:1px}
+.tab .x{color:var(--faint);font-size:10px}
+.plus{width:26px;height:26px;color:var(--faint);font-size:18px}
+.topbar .right{margin-left:auto;display:flex;align-items:center;gap:14px;color:var(--faint);font-size:9.5px;font-family:var(--mono)}
+.ghost{height:26px;padding:0 9px;border:1px solid var(--line);border-radius:4px;color:var(--muted);font-size:10px}
+.toolbar{height:43px;display:flex;align-items:center;gap:3px;padding:0 15px;border-bottom:1px solid var(--line);background:#101a1b}
+.tool{height:27px;min-width:28px;padding:0 7px;border-radius:4px;color:#8f9e97;display:grid;place-items:center;font-size:10.5px}
+.tool:hover{background:#1a292a;color:var(--ink)}
+.tool.on{background:var(--brass-soft);color:var(--brass)}
+.group{display:flex;align-items:center;gap:2px;padding-right:7px;border-right:1px solid var(--line)}
+.spacer{flex:1}
+.layout-label{display:flex;align-items:center;gap:8px;color:var(--faint);font-size:9.5px;font-family:var(--mono)}
+.layout-label b{color:var(--brass);font-weight:500}
+.workspace{flex:1;min-height:0;display:flex}
+.rail{width:68px;flex:0 0 68px;border-right:1px solid var(--line);background:#0b1314;display:flex;flex-direction:column;align-items:center;padding-top:15px;gap:7px}
+.rail-button{width:42px;height:38px;display:grid;place-items:center;border-radius:4px;color:var(--faint);font-family:var(--mono);font-size:9px;border:1px solid transparent}
+.rail-button.active{color:var(--brass);border-color:#2d3b34;background:#121d1d}
+.rail-button .icon{font-size:16px;line-height:1;margin-bottom:2px}
+.rail-spacer{flex:1}
+.rail-foot{width:35px;height:35px;border:1px solid var(--line);border-radius:50%;display:grid;place-items:center;color:var(--faint);font-size:9px;margin-bottom:15px}
+.panes{flex:1;min-width:0;display:flex}
+.pane{min-width:0;display:flex;flex-direction:column;background:var(--pane);position:relative}
+.pane.left{flex:1.02}
+.pane.right{flex:.98;background:var(--pane-2)}
+.pane-tabbar{height:36px;display:flex;align-items:center;padding:0 15px 0 18px;border-bottom:1px solid var(--line-2);background:#0e1819;gap:6px}
+.pane-tab{font-size:10.5px;color:var(--muted);padding:5px 9px;border:1px solid transparent;border-radius:3px}
+.pane-tab.active{color:var(--ink);border-color:#2d3b32;background:#152122}
+.pane-tab .draft{width:4px;height:4px;border-radius:50%;background:var(--rose);display:inline-block;margin-left:6px}
+.pane-tabbar .more{margin-left:auto;color:var(--faint);font-size:11px}
+.pane-scroll{flex:1;overflow:hidden;padding:28px 44px 22px}
+.pane.right .pane-scroll{padding-left:36px;padding-right:36px}
+.meta{font-family:var(--mono);font-size:9px;letter-spacing:.15em;color:var(--brass);margin-bottom:9px}
+h1{font-family:var(--serif);font-size:29px;line-height:1.3;font-weight:600;margin:0 0 12px;color:#edf1ea}
+.sub{font-family:var(--mono);font-size:9px;color:var(--faint);margin-bottom:17px}
+.lede{font-family:var(--serif);font-size:14px;line-height:1.95;color:#b7c2bb;margin:0 0 16px}
+.body{font-family:var(--serif);font-size:13px;line-height:1.95;color:#aebbb3;margin:0 0 12px}
+.line{height:1px;background:linear-gradient(90deg,var(--brass),var(--line) 38%,transparent);margin:18px 0;opacity:.45}
+.block-title{display:flex;align-items:center;gap:8px;margin:19px 0 8px;font-size:11.5px;color:#d8e1db;font-weight:600}
+.block-title span{font-family:var(--mono);font-size:8.5px;color:var(--faint);font-weight:400}
+.table{width:100%;border-collapse:collapse;margin:10px 0 16px;font-family:var(--sans);font-size:10px;color:#aebbb3}
+th,td{border:1px solid #263536;padding:7px 8px;text-align:left;vertical-align:top}
+th{background:#182425;color:#d0dad4;font-weight:600}
+td p{margin:0 0 4px;line-height:1.5}td p:last-child{margin-bottom:0}
+.note{border-left:2px solid var(--brass);padding:8px 11px;margin:14px 0;background:linear-gradient(90deg,rgba(200,157,88,.08),transparent);font-size:10.5px;line-height:1.7;color:#aebbb3}
+.note b{color:var(--brass)}
+.figure{margin-top:16px;border:1px solid #263536;padding:7px;background:#0d1718}
+.art{height:76px;background:
+  radial-gradient(circle at 24% 40%,rgba(200,157,88,.18),transparent 23%),
+  linear-gradient(120deg,rgba(122,183,163,.13),transparent 52%),
+  repeating-linear-gradient(90deg,transparent 0 44px,rgba(255,255,255,.025) 44px 45px),
+  repeating-linear-gradient(0deg,transparent 0 18px,rgba(255,255,255,.022) 18px 19px);
+  position:relative}
+.art::after{content:"";position:absolute;left:18px;right:18px;bottom:14px;height:20px;border-left:1px solid var(--brass);border-bottom:1px solid var(--brass);transform:skewX(-16deg);opacity:.6}
+.figure figcaption{font-family:var(--mono);font-size:8.5px;color:var(--faint);padding-top:6px}
+.right-head{font-family:var(--serif);font-size:22px;line-height:1.4;margin:0 0 7px}
+.change{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-2);font-size:10.5px;line-height:1.55;color:#aebbb3}
+.change .tag{font-family:var(--mono);font-size:8px;color:var(--mint);border:1px solid #2d4b45;border-radius:2px;height:16px;padding:1px 4px;flex:0 0 auto}
+.change .tag.fix{color:var(--rose);border-color:#513632}
+.code{margin:13px 0;padding:12px 13px;border:1px solid #263536;background:#0a1213;color:#c7d3cc;font-family:var(--mono);font-size:9.5px;line-height:1.75}
+.code .k{color:#d3ae6c}.code .s{color:#8dc1ab}.code .c{color:#52635c}
+.splitter{width:16px;flex:0 0 16px;background:#0a1213;border-left:1px solid var(--line);border-right:1px solid var(--line);position:relative;display:flex;align-items:center;justify-content:center}
+.splitter::before{content:"";position:absolute;top:11%;bottom:11%;width:1px;background:linear-gradient(transparent,var(--brass),transparent);opacity:.5}
+.handle{position:relative;z-index:1;width:10px;height:42px;border:1px solid #4e4432;border-radius:5px;background:#151d1c;color:var(--brass);display:grid;place-items:center;font-size:8px;line-height:1;letter-spacing:-1px;box-shadow:0 0 18px rgba(200,157,88,.15)}
+.statusbar{height:28px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-top:1px solid var(--line);background:#0a1213;font-family:var(--mono);font-size:8.5px;color:#63726b}
+.status-left,.status-right{display:flex;gap:14px;align-items:center}
+.status-left b{color:var(--brass);font-weight:400}
+</style>
+</head>
+<body>
+<div class="window">
+  <header class="titlebar">
+    <div class="brand"><div class="mark">M</div>Mdmuder <small>NIGHT SHIFT</small></div>
+    <div class="search">⌕ 搜索文件或命令 <span>Ctrl K</span></div>
+    <div class="title-actions"><b>2 PANES</b><span>—</span><span>□</span><span>×</span></div>
+  </header>
+  <div class="topbar">
+    <div class="tab active"><span class="tick"></span>山海经札记.md<span class="x">×</span></div>
+    <div class="tab">API 变更记录.md<span class="x">×</span></div>
+    <div class="tab">未命名 3.md<span class="x">×</span></div>
+    <button class="plus">+</button>
+    <div class="right"><span>拖动标签调整顺序</span><button class="ghost">双栏 / 单栏</button></div>
+  </div>
+  <div class="toolbar">
+    <div class="group"><button class="tool">↶</button><button class="tool">↷</button></div>
+    <div class="group"><button class="tool">H1</button><button class="tool">H2</button><button class="tool">H3</button></div>
+    <div class="group"><button class="tool"><b>B</b></button><button class="tool"><i>I</i></button><button class="tool">S</button><button class="tool">&lt;/&gt;</button></div>
+    <div class="group"><button class="tool">链</button><button class="tool">图</button><button class="tool on">表</button></div>
+    <div class="group"><button class="tool">引</button><button class="tool">•</button><button class="tool">1.</button><button class="tool">☑</button></div>
+    <div class="spacer"></div>
+    <div class="layout-label"><b>SPLIT 52 / 48</b><span>拖动中间分隔条调整</span></div>
+  </div>
+  <main class="workspace">
+    <aside class="rail">
+      <div class="rail-button active"><span class="icon">▤</span>文件</div>
+      <div class="rail-button"><span class="icon">◫</span>双栏</div>
+      <div class="rail-button"><span class="icon">⌕</span>查找</div>
+      <div class="rail-button"><span class="icon">◷</span>历史</div>
+      <div class="rail-spacer"></div>
+      <div class="rail-foot">M</div>
+    </aside>
+    <div class="panes">
+      <section class="pane left">
+        <div class="pane-tabbar">
+          <div class="pane-tab active">山海经札记.md</div>
+          <div class="pane-tab">注：异兽<span class="draft"></span></div>
+          <div class="more">⋯</div>
+        </div>
+        <div class="pane-scroll">
+          <div class="meta">FIELD NOTES / 卷三</div>
+          <h1>南山经：从鹊山到招摇</h1>
+          <div class="sub">2026.10.20 · 阅读 12 分钟 · 2,184 字</div>
+          <p class="lede">山经的文字有一种奇怪的耐心。它不急着解释异兽，只先告诉你山的方向、树的形状、水的味道。</p>
+          <p class="body">读到第三遍才发现，真正重要的不是“它是什么”，而是“它如何被看见”。这也是我今天想改编辑器界面的原因。</p>
+          <div class="line"></div>
+          <div class="block-title">异兽索引 <span>TABLE / 03</span></div>
+          <table class="table">
+            <thead><tr><th colspan="2">条目</th><th>原文线索</th></tr></thead>
+            <tbody>
+              <tr><td rowspan="2">鹿蜀</td><td>状如马而白首</td><td>其音如谣</td></tr>
+              <tr><td>佩之宜子孙</td><td>见《南山经》</td></tr>
+              <tr><td colspan="3"><p>异兽不是孤立的符号。</p><p>它总和山、水、草木、声音一起出现。</p></td></tr>
+            </tbody>
+          </table>
+          <div class="note"><b>批注</b>　多段落单元格适合放“原文—注释—联想”三层信息，不必把解释挤成一行。</div>
+          <figure class="figure"><div class="art"></div><figcaption>fig. 03 — 山势与水流的方向感</figcaption></figure>
+        </div>
+      </section>
+      <div class="splitter"><div class="handle">⋮<br>⋮</div></div>
+      <section class="pane right">
+        <div class="pane-tabbar">
+          <div class="pane-tab active">API 变更记录.md</div>
+          <div class="pane-tab">release-notes.md<span class="draft"></span></div>
+          <div class="more">⋯</div>
+        </div>
+        <div class="pane-scroll">
+          <div class="meta">CHANGELOG / v0.4</div>
+          <h2 class="right-head">文档工作区 API</h2>
+          <div class="sub">内部草案 · 仅工程可见</div>
+          <p class="body" style="font-size:12px">目标是把“打开多个文件”从标签页状态提升为可布局的工作区。每个 pane 拥有独立文档、选区与滚动位置。</p>
+          <div class="change"><span class="tag">ADD</span><span>增加 `SplitWorkspace`，支持左右两栏拖拽调整宽度。</span></div>
+          <div class="change"><span class="tag">ADD</span><span>标签可以拖动排序，拖到另一栏时创建新的 pane。</span></div>
+          <div class="change"><span class="tag fix">FIX</span><span>切换 pane 不再丢失撤销栈与未保存状态。</span></div>
+          <div class="change"><span class="tag">NOTE</span><span>同步滚动是可选项，默认关闭，避免误判文档结构。</span></div>
+          <div class="code"><span class="c">// workspace state</span><br><span class="k">const</span> workspace = {<br>&nbsp;&nbsp;panes: [<br>&nbsp;&nbsp;&nbsp;&nbsp;{ doc: <span class="s">"山海经札记.md"</span>, ratio: <span class="s">0.52</span> },<br>&nbsp;&nbsp;&nbsp;&nbsp;{ doc: <span class="s">"API 变更记录.md"</span>, ratio: <span class="s">0.48</span> }<br>&nbsp;&nbsp;],<br>&nbsp;&nbsp;drag: <span class="s">"resize"</span><br>}</div>
+          <div class="block-title">交互约定 <span>SPEC</span></div>
+          <div class="change"><span class="tag">01</span><span>分隔条左右拖动实时改变宽度，双击回到 50 / 50。</span></div>
+          <div class="change"><span class="tag">02</span><span>标签跨栏拖动需要保留原文档，不复制缓冲区。</span></div>
+          <div class="change"><span class="tag">03</span><span>关闭 pane 前保留未保存提示。</span></div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <footer class="statusbar">
+    <div class="status-left"><b>WORKSPACE 02</b><span>左：山海经札记.md</span><span>右：API 变更记录.md</span></div>
+    <div class="status-right"><span>2,184 字</span><span>UTF-8</span><span>Markdown</span><span>已保存 11:42</span></div>
+  </footer>
+</div>
+</body>
+</html>

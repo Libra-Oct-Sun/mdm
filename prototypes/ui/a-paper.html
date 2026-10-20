@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<title>Mdmuder · 纸墨原型</title>
+<style>
+:root{
+  --paper:#f3eee3;--paper-2:#fbf8f1;--paper-3:#ece4d6;
+  --ink:#1d241f;--muted:#6e756c;--faint:#9a9f95;--line:#d8cfbf;
+  --jade:#2f6a58;--jade-soft:#e0ece4;--seal:#a8422f;--gold:#b38a4d;
+  --sans:"Segoe UI Variable Text","Microsoft YaHei UI","PingFang SC",sans-serif;
+  --serif:"Source Han Serif SC","Noto Serif CJK SC","Songti SC","SimSun",serif;
+  --mono:"Cascadia Code","Sarasa Mono SC",Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:1600px;height:1000px;overflow:hidden}
+body{background:#cbd2c9;font-family:var(--sans);color:var(--ink)}
+button{font:inherit;color:inherit;border:0;background:none}
+.window{width:1600px;height:1000px;display:flex;flex-direction:column;background:var(--paper);border:1px solid #aeb8ae}
+.titlebar{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px 0 18px;background:var(--paper-2);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;letter-spacing:.02em}
+.brand-mark{width:24px;height:24px;border-radius:7px;background:var(--jade);color:#f7fbf6;display:grid;place-items:center;font-family:var(--serif);font-size:15px;box-shadow:0 2px 5px rgba(42,73,57,.18)}
+.brand small{color:var(--muted);font-weight:500;margin-left:4px}
+.title-center{font-size:11px;color:var(--faint);letter-spacing:.12em}
+.window-actions{display:flex;gap:16px;color:var(--muted);font-family:var(--mono);font-size:11px}
+.tabbar{height:42px;display:flex;align-items:flex-end;gap:2px;padding:0 14px;background:var(--paper-2);border-bottom:1px solid var(--line)}
+.tab{height:34px;display:flex;align-items:center;gap:9px;padding:0 13px;border:1px solid transparent;border-radius:8px 8px 0 0;color:var(--muted);font-size:12px;position:relative}
+.tab.active{background:var(--paper);border-color:var(--line);border-bottom-color:var(--paper);color:var(--ink)}
+.tab.active::after{content:"";position:absolute;left:12px;right:12px;bottom:-1px;height:1px;background:var(--paper)}
+.grip{color:var(--faint);letter-spacing:-2px;font-size:11px}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--seal)}
+.tab-new{width:30px;height:30px;color:var(--faint);font-size:19px;margin-left:2px}
+.tab-spacer{flex:1}
+.tab-meta{font-family:var(--mono);font-size:10px;color:var(--faint);padding-bottom:10px}
+.toolbar{height:48px;display:flex;align-items:center;gap:6px;padding:0 16px;background:#f7f2e8;border-bottom:1px solid var(--line)}
+.group{display:flex;align-items:center;gap:2px;padding-right:8px;border-right:1px solid var(--line)}
+.group:last-of-type{border-right:0}
+.tool{min-width:29px;height:28px;padding:0 7px;border-radius:6px;display:grid;place-items:center;color:#515a52;font-size:11px;font-weight:600}
+.tool:hover{background:#e9e1d3}
+.tool.on{background:var(--jade-soft);color:var(--jade)}
+.tool.wide{padding:0 10px;font-weight:500}
+.spacer{flex:1}
+.view-note{font-size:10.5px;color:var(--muted);display:flex;align-items:center;gap:7px}
+.view-note b{color:var(--jade);font-weight:700}
+.workspace{flex:1;min-height:0;display:flex;background:var(--paper)}
+.outline{width:226px;flex:0 0 226px;border-right:1px solid var(--line);background:#f0eadf;padding:22px 16px 16px}
+.outline h2{margin:0 0 17px;font-size:12px;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.outline .item{padding:7px 9px;border-left:2px solid transparent;font-size:11.5px;color:var(--muted);line-height:1.35}
+.outline .item.active{color:var(--jade);border-left-color:var(--jade);background:#e5ede5}
+.outline .item.indent{padding-left:23px;font-size:11px}
+.outline .files{margin-top:30px;padding-top:17px;border-top:1px solid var(--line)}
+.file{display:flex;align-items:center;gap:8px;padding:7px 8px;font-size:11px;color:#5d665e}
+.file .eyebrow{font-family:var(--mono);font-size:9px;color:var(--faint);width:19px}
+.file.active{background:#e8efe7;color:var(--jade);border-radius:5px}
+.split{flex:1;min-width:0;display:flex}
+.pane{min-width:0;background:var(--paper);display:flex;flex-direction:column}
+.pane.left{flex:1.03}
+.pane.right{flex:.97}
+.pane-head{height:37px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;border-bottom:1px solid rgba(216,207,191,.7);font-size:10.5px;color:var(--muted)}
+.pane-head strong{font-size:11px;color:var(--ink);font-weight:600}
+.pane-head .saved{color:var(--jade);font-size:10px}
+.pane-scroll{padding:32px 46px 26px;overflow:hidden}
+.pane.right .pane-scroll{padding-left:38px;padding-right:38px}
+.kicker{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;color:var(--seal);margin-bottom:10px}
+h1{font-family:var(--serif);font-size:31px;line-height:1.28;font-weight:600;letter-spacing:-.01em;margin:0 0 13px}
+.lede{font-family:var(--serif);font-size:15px;line-height:1.9;color:#4f584f;margin:0 0 17px}
+.body{font-family:var(--serif);font-size:13.5px;line-height:1.95;color:#3e473f;margin:0 0 13px}
+.rule{height:1px;background:var(--line);margin:20px 0}
+.quote{border-left:2px solid var(--seal);padding:1px 0 1px 14px;margin:15px 0;font-family:var(--serif);font-size:13px;line-height:1.8;color:#6a5a50;background:linear-gradient(90deg,rgba(168,66,47,.035),transparent)}
+.section-title{display:flex;align-items:baseline;gap:9px;margin:21px 0 8px;font-size:12.5px;font-weight:700;color:var(--jade)}
+.section-title span{font-family:var(--mono);font-size:9px;color:var(--faint);font-weight:400}
+table{width:100%;border-collapse:collapse;margin:13px 0 17px;font-family:var(--sans);font-size:10.5px;color:#4f584f}
+th,td{border:1px solid #d4cbbb;padding:8px 9px;text-align:left;vertical-align:top}
+th{background:#e7e0d3;color:#3f493f;font-weight:700}
+td p{margin:0 0 5px;line-height:1.5}
+td p:last-child{margin-bottom:0}
+.callout{display:flex;gap:11px;padding:11px 12px;border:1px solid #d7cdbd;background:#f8f3e9;margin:16px 0;font-size:10.5px;line-height:1.6;color:#687067}
+.callout b{color:var(--jade)}
+.figure{margin:18px 0 0;border:1px solid #d6cdbc;background:#e8e2d4;padding:8px}
+.figure-art{height:92px;background:
+  linear-gradient(135deg,rgba(47,106,88,.12),rgba(179,138,77,.12)),
+  repeating-linear-gradient(90deg,transparent 0 31px,rgba(47,106,88,.08) 31px 32px),
+  repeating-linear-gradient(0deg,transparent 0 20px,rgba(47,106,88,.07) 20px 21px);
+  position:relative}
+.figure-art::before{content:"";position:absolute;left:20px;right:20px;bottom:15px;height:26px;border-left:2px solid var(--jade);border-bottom:2px solid var(--jade);transform:skewX(-18deg);opacity:.55}
+.figure figcaption{font-family:var(--mono);font-size:9px;color:var(--faint);padding-top:7px}
+.right-title{font-family:var(--serif);font-size:23px;font-weight:600;margin:0 0 6px}
+.right-sub{font-size:10.5px;color:var(--faint);font-family:var(--mono);margin-bottom:18px}
+.task{display:flex;align-items:flex-start;gap:9px;padding:7px 0;font-family:var(--sans);font-size:11.5px;line-height:1.5;color:#4f584f;border-bottom:1px dotted #ddd3c2}
+.check{width:13px;height:13px;flex:0 0 13px;border:1px solid #b9b29f;border-radius:3px;margin-top:1px}
+.check.done{background:var(--jade);border-color:var(--jade);position:relative}
+.check.done::after{content:"✓";position:absolute;left:2px;top:-2px;color:#f7fbf6;font-size:10px}
+.code{margin:15px 0;padding:13px 14px;background:#252d26;color:#dce6da;border-radius:5px;font-family:var(--mono);font-size:10px;line-height:1.7;overflow:hidden}
+.code .k{color:#d6ad78}.code .s{color:#9dc8aa}.code .c{color:#7d8e80}
+.mini{display:flex;gap:7px;margin:15px 0}
+.chip{padding:4px 7px;border:1px solid #d4cbbb;border-radius:3px;font-family:var(--mono);font-size:9px;color:#746e61}
+.splitter{width:14px;flex:0 0 14px;background:var(--paper-2);border-left:1px solid var(--line);border-right:1px solid var(--line);display:flex;align-items:center;justify-content:center;position:relative}
+.splitter::after{content:"";position:absolute;top:25%;bottom:25%;width:1px;background:#c6bcaa}
+.splitter .handle{position:relative;z-index:1;width:9px;height:38px;border:1px solid #c3b8a6;border-radius:5px;background:#f8f3e9;display:flex;align-items:center;justify-content:center;color:#8e948a;font-size:8px;line-height:1;letter-spacing:-1px;box-shadow:0 1px 3px rgba(75,64,43,.1)}
+.statusbar{height:29px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#e9e2d5;border-top:1px solid var(--line);font-family:var(--mono);font-size:9px;color:#7e8279}
+.status-left,.status-right{display:flex;align-items:center;gap:13px}
+.status-left b{color:var(--jade);font-weight:500}
+</style>
+</head>
+<body>
+<div class="window">
+  <header class="titlebar">
+    <div class="brand"><div class="brand-mark">M</div>Mdmuder <small>纸墨</small></div>
+    <div class="title-center">MULTI-DOCUMENT WORKSPACE</div>
+    <div class="window-actions"><span>—</span><span>□</span><span>×</span></div>
+  </header>
+  <div class="tabbar">
+    <div class="tab active"><span class="grip">⋮⋮</span><span>产品设计.md</span><span class="dot"></span><span>×</span></div>
+    <div class="tab"><span>会议纪要.md</span><span>×</span></div>
+    <div class="tab"><span>读书笔记.md</span><span>×</span></div>
+    <button class="tab-new">+</button>
+    <div class="tab-spacer"></div>
+    <div class="tab-meta">拖动标签可排序 · 拖动中间分隔条可调宽度</div>
+  </div>
+  <div class="toolbar">
+    <div class="group"><button class="tool">↶</button><button class="tool">↷</button></div>
+    <div class="group"><button class="tool">H1</button><button class="tool">H2</button><button class="tool">H3</button></div>
+    <div class="group"><button class="tool"><b>B</b></button><button class="tool"><i>I</i></button><button class="tool">S</button><button class="tool">&lt;/&gt;</button></div>
+    <div class="group"><button class="tool">链</button><button class="tool">图</button><button class="tool on">表</button></div>
+    <div class="group"><button class="tool">引</button><button class="tool">•</button><button class="tool">1.</button><button class="tool">☑</button></div>
+    <div class="spacer"></div>
+    <div class="view-note"><b>双栏</b> 2 个文档并行编辑 <span style="font-family:var(--mono)">⌘⇧2</span></div>
+  </div>
+  <main class="workspace">
+    <aside class="outline">
+      <h2>大纲</h2>
+      <div class="item active">关于静默写作的七个注脚</div>
+      <div class="item indent">一、留白不是空白</div>
+      <div class="item indent">二、让段落自己呼吸</div>
+      <div class="item indent">三、表格是另一种句子</div>
+      <div class="item indent">四、把修改留在纸面</div>
+      <div class="files">
+        <h2>打开的文件</h2>
+        <div class="file active"><span class="eyebrow">01</span>产品设计.md</div>
+        <div class="file"><span class="eyebrow">02</span>会议纪要.md</div>
+        <div class="file"><span class="eyebrow">03</span>读书笔记.md</div>
+      </div>
+    </aside>
+    <div class="split">
+      <section class="pane left">
+        <div class="pane-head"><strong>产品设计.md</strong><span class="saved">已保存</span></div>
+        <div class="pane-scroll">
+          <div class="kicker">ESSAY / 02</div>
+          <h1>关于静默写作的七个注脚</h1>
+          <p class="lede">好的编辑器不该抢走句子。它应该像一张摊开的纸，知道何时接住你的手，何时退到边缘。</p>
+          <p class="body">写作不是把想法搬进输入框，而是让想法在反复停顿中长出形状。界面的密度、光线的温度、一次移动光标时的阻力，都会悄悄改变一段文字的命运。</p>
+          <div class="quote">“把工具栏收小一点，把页面留大一点。剩下的，让文字自己说话。”</div>
+          <div class="section-title">二、让段落自己呼吸 <span>01 — 04</span></div>
+          <table>
+            <thead><tr><th colspan="2">写作状态</th><th>建议</th></tr></thead>
+            <tbody>
+              <tr><td rowspan="2">初稿</td><td>先写，不回头</td><td>关闭实时字数提醒</td></tr>
+              <tr><td>让段落变短</td><td>每个小节只留一个动作</td></tr>
+              <tr><td colspan="3"><p>第二遍再处理结构。</p><p>把标题当作路标，不要当作结论。</p></td></tr>
+            </tbody>
+          </table>
+          <div class="callout"><b>提示</b><span>选中多个单元格后，浮动工具栏会出现“合并”。合并后的单元格可以继续写多个段落。</span></div>
+          <figure class="figure"><div class="figure-art"></div><figcaption>fig. 02 — 一张纸的留白比例</figcaption></figure>
+        </div>
+      </section>
+      <div class="splitter"><div class="handle">⋮<br>⋮</div></div>
+      <section class="pane right">
+        <div class="pane-head"><strong>会议纪要.md</strong><span style="color:var(--muted)">草稿</span></div>
+        <div class="pane-scroll">
+          <div class="kicker">NOTES / 10.20</div>
+          <h2 class="right-title">编辑器体验评审</h2>
+          <div class="right-sub">2026-10-20 · 产品 / 设计 / 工程</div>
+          <p class="body" style="font-size:12.5px">今天只讨论一件事：当两个文档同时打开时，怎样让切换和对照不打断阅读。</p>
+          <div class="task"><span class="check done"></span><span>双栏默认保留左侧大纲，宽度可收至 180px</span></div>
+          <div class="task"><span class="check done"></span><span>标签支持左右拖动排序，跨栏拖动需要二次确认</span></div>
+          <div class="task"><span class="check"></span><span>中间分隔条增加双击复位到 50 / 50</span></div>
+          <div class="task"><span class="check"></span><span>对比模式：两栏同步滚动，但独立选择</span></div>
+          <div class="split" style="display:block;margin:18px 0 0">
+            <div class="section-title" style="margin-top:0">实现备忘 <span>SNIPPET</span></div>
+            <div class="code"><span class="c">// split state</span><br><span class="k">const</span> layout = {<br>&nbsp;&nbsp;left: <span class="s">"产品设计.md"</span>,<br>&nbsp;&nbsp;right: <span class="s">"会议纪要.md"</span>,<br>&nbsp;&nbsp;ratio: <span class="s">0.52</span><br>}</div>
+          </div>
+          <div class="mini"><span class="chip">drag tabs</span><span class="chip">split pane</span><span class="chip">sync scroll</span></div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <footer class="statusbar">
+    <div class="status-left"><b>2 个文档</b><span>左：产品设计.md</span><span>右：会议纪要.md</span></div>
+    <div class="status-right"><span>字数 2,480</span><span>UTF-8</span><span>Markdown</span><span>已保存</span></div>
+  </footer>
+</div>
+</body>
+</html>

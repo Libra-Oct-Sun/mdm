@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<title>Mdmuder · 专注纸面</title>
+<style>
+:root{
+  --bg:#e9e8e2;--paper:#faf8f2;--paper-2:#fffdf8;--ink:#20251f;--muted:#6d746c;
+  --faint:#a0a69d;--line:#e4dfd4;--line-2:#eee9df;--jade:#3d6c5a;
+  --jade-soft:#edf3ed;--dirty:#b34b37;--shadow:0 10px 28px rgba(58,52,38,.11);
+  --sans:"Segoe UI Variable Text","Microsoft YaHei UI","PingFang SC",sans-serif;
+  --serif:"Source Han Serif SC","Noto Serif CJK SC","Songti SC","SimSun",serif;
+  --mono:"Cascadia Code","Sarasa Mono SC",Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:1600px;height:1000px;overflow:hidden}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans)}
+button{font:inherit;color:inherit;background:none;border:0}
+.window{width:1600px;height:1000px;display:flex;flex-direction:column;background:var(--paper);border:1px solid #c9c7bd}
+.titlebar{height:38px;display:flex;align-items:center;gap:10px;padding:0 13px;border-bottom:1px solid var(--line);background:var(--paper-2)}
+.brand{display:flex;align-items:center;gap:8px;min-width:136px;font-size:12px;font-weight:700}
+.mark{width:22px;height:22px;border-radius:50%;border:1px solid var(--jade);color:var(--jade);display:grid;place-items:center;font-family:var(--serif);font-size:13px}
+.brand small{font-family:var(--mono);font-size:7.5px;color:var(--faint);font-weight:400;letter-spacing:.08em}
+.title-file{font-size:9.5px;color:var(--muted);display:flex;align-items:center;gap:7px}
+.title-file b{color:var(--ink);font-weight:600}
+.command{margin-left:auto;height:24px;min-width:148px;display:flex;align-items:center;gap:7px;padding:0 8px;border:1px solid var(--line);border-radius:3px;color:var(--faint);font-size:9px;background:var(--paper)}
+.command kbd{margin-left:auto}
+kbd{font-family:var(--mono);font-size:7.5px;color:var(--faint);border:1px solid #d8d2c7;border-radius:2px;padding:1px 4px;background:var(--paper-2)}
+.win{display:flex;gap:12px;margin-left:5px;color:var(--muted);font-family:var(--mono);font-size:9px}
+.tabbar{height:34px;display:flex;align-items:flex-end;gap:2px;padding:0 15px;border-bottom:1px solid var(--line);background:var(--paper)}
+.tab{position:relative;height:28px;display:flex;align-items:center;gap:6px;padding:0 10px;color:var(--muted);font-size:10px;border-radius:3px 3px 0 0}
+.tab.active{background:var(--paper-2);color:var(--ink);border:1px solid var(--line);border-bottom-color:var(--paper-2);margin-bottom:-1px}
+.tab.active::after{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:1px;background:var(--paper-2)}
+.grip{color:var(--faint);letter-spacing:-2px;font-size:8px}
+.dirty{width:4px;height:4px;border-radius:50%;background:var(--dirty)}
+.x{color:var(--faint);font-size:10px;margin-left:3px}
+.tab-plus{width:24px;color:var(--faint);font-size:16px;margin-left:1px}
+.tab-meta{margin-left:auto;font-family:var(--mono);font-size:7.5px;color:var(--faint);padding-bottom:7px}
+.toolbar{height:36px;display:flex;align-items:center;gap:3px;padding:0 15px;border-bottom:1px solid var(--line);background:var(--paper-2)}
+.tool{height:24px;min-width:25px;padding:0 5px;border-radius:3px;color:var(--muted);font-size:9.5px;display:grid;place-items:center}
+.tool:hover{background:#f0ece3;color:var(--ink)}
+.tool.on{background:var(--jade-soft);color:var(--jade)}
+.sep{width:1px;height:14px;background:var(--line);margin:0 4px}
+.spacer{flex:1}
+.focus-label{display:flex;align-items:center;gap:7px;font-size:8.5px;color:var(--faint);font-family:var(--mono)}
+.focus-label i{width:4px;height:4px;border-radius:50%;background:var(--jade)}
+.workspace{flex:1;min-height:0;display:flex;background:var(--paper)}
+.rail-edge{width:31px;flex:0 0 31px;border-right:1px solid var(--line);display:flex;align-items:center;justify-content:center;background:#f6f3ec}
+.rail-edge span{writing-mode:vertical-rl;font-family:var(--mono);font-size:7.5px;letter-spacing:.18em;color:var(--faint);transform:rotate(180deg)}
+.editor{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--paper)}
+.editor-head{height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 31px;color:var(--faint);font-size:8.5px}
+.editor-head b{font-family:var(--mono);font-size:7.5px;letter-spacing:.12em;color:#8a9188;font-weight:400}
+.scroll{flex:1;overflow:hidden;padding:32px 0 20px}
+.writing{width:720px;margin:0 auto}
+.kicker{font-family:var(--mono);font-size:8px;letter-spacing:.16em;color:var(--jade);margin-bottom:10px}
+h1{font-family:var(--serif);font-size:34px;line-height:1.26;font-weight:600;letter-spacing:-.015em;margin:0 0 14px}
+.sub{font-family:var(--mono);font-size:8px;color:var(--faint);margin-bottom:18px}
+.lede{font-family:var(--serif);font-size:15px;line-height:1.95;color:#555c54;margin:0 0 16px}
+.body{font-family:var(--serif);font-size:13px;line-height:1.95;color:#4f574f;margin:0 0 12px}
+.rule{height:1px;background:var(--line);margin:20px 0 17px}
+.section{display:flex;align-items:center;gap:8px;margin:18px 0 9px;font-size:11px;font-weight:700;color:#38423a}
+.section span{font-family:var(--mono);font-size:7.5px;color:var(--faint);font-weight:400}
+.table-wrap{position:relative;margin:10px 0 17px;padding-top:31px}
+.float-tools{position:absolute;top:0;left:0;height:26px;display:flex;align-items:center;gap:2px;padding:3px 4px;border:1px solid #d5cfc2;border-radius:4px;background:var(--paper-2);box-shadow:var(--shadow);font-size:8.5px;color:var(--muted)}
+.float-tools b{font-family:var(--mono);font-size:7px;color:var(--jade);font-weight:500;padding:0 3px}
+.float-tools button{height:19px;padding:0 5px;border-radius:2px;font-size:8.5px}
+.float-tools button:hover{background:#f0ece3}
+table{width:100%;border-collapse:collapse;font-size:10px;color:#505950}
+th,td{border:1px solid #ded8cb;padding:7px 8px;text-align:left;vertical-align:top}
+th{background:#f3f0e8;color:#3e483f;font-weight:600}
+td p{margin:0 0 4px;line-height:1.5}td p:last-child{margin-bottom:0}
+.quote{margin:15px 0;padding:2px 0 2px 14px;border-left:2px solid var(--dirty);font-family:var(--serif);font-size:12.5px;line-height:1.8;color:#6e6257;background:linear-gradient(90deg,rgba(179,75,55,.035),transparent)}
+.figure{margin-top:15px;border:1px solid var(--line);background:#f7f4ed;padding:7px}
+.art{height:74px;background:
+  linear-gradient(115deg,rgba(61,108,90,.12),transparent 55%),
+  repeating-linear-gradient(90deg,transparent 0 40px,rgba(61,108,90,.055) 40px 41px),
+  repeating-linear-gradient(0deg,transparent 0 18px,rgba(61,108,90,.045) 18px 19px);
+  position:relative}
+.art::after{content:"";position:absolute;left:18px;right:18px;bottom:14px;height:18px;border-left:1px solid var(--jade);border-bottom:1px solid var(--jade);transform:skewX(-18deg);opacity:.55}
+.figure figcaption{font-family:var(--mono);font-size:7px;color:var(--faint);padding-top:5px}
+.statusbar{height:25px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-top:1px solid var(--line);background:#f6f3ec;font-family:var(--mono);font-size:7.5px;color:#858b81}
+.status-left,.status-right{display:flex;gap:13px;align-items:center}
+.status-left b{color:var(--jade);font-weight:500}
+</style>
+</head>
+<body>
+<div class="window">
+  <header class="titlebar">
+    <div class="brand"><div class="mark">M</div>Mdmuder <small>FOCUS</small></div>
+    <div class="title-file"><b>编辑体验札记.md</b><span>·</span><span>已保存</span></div>
+    <div class="command">⌕ 搜索或执行命令 <kbd>Ctrl K</kbd></div>
+    <div class="win"><span>—</span><span>□</span><span>×</span></div>
+  </header>
+  <div class="tabbar">
+    <div class="tab active"><span class="grip">⋮⋮</span>编辑体验札记.md<span class="dirty"></span><span class="x">×</span></div>
+    <div class="tab">版本说明.md<span class="x">×</span></div>
+    <div class="tab">素材清单.md<span class="x">×</span></div>
+    <button class="tab-plus">+</button>
+    <div class="tab-meta">拖动排序 · ALT ← →</div>
+  </div>
+  <div class="toolbar">
+    <button class="tool">↶</button><button class="tool">↷</button><span class="sep"></span>
+    <button class="tool">H1</button><button class="tool">H2</button><button class="tool">H3</button><span class="sep"></span>
+    <button class="tool"><b>B</b></button><button class="tool"><i>I</i></button><button class="tool">S</button><button class="tool">&lt;/&gt;</button><span class="sep"></span>
+    <button class="tool">链</button><button class="tool">图</button><button class="tool on">表</button><button class="tool">引</button><button class="tool">•</button><button class="tool">1.</button><button class="tool">☑</button>
+    <div class="spacer"></div>
+    <div class="focus-label"><i></i>专注模式</div>
+  </div>
+  <main class="workspace">
+    <div class="rail-edge"><span>大纲 / 文件</span></div>
+    <section class="editor">
+      <div class="editor-head"><b>EDITING / 2026.10.20</b><span>12 分钟阅读 · 2,184 字</span></div>
+      <div class="scroll">
+        <article class="writing">
+          <div class="kicker">A NOTE ON TOOLS / 03</div>
+          <h1>让编辑器退后一步</h1>
+          <div class="sub">2026-10-20 · 写作与界面 · 草稿</div>
+          <p class="lede">最好的工具感，不是让人注意到工具，而是让动作变得确定。打开、写、找到、保存，每次都知道发生了什么。</p>
+          <p class="body">专注模式不隐藏能力，只把能力放到需要它的位置。工具栏保留格式动作，大纲收成一条窄边，文件名和保存状态留在视线边缘。</p>
+          <div class="rule"></div>
+          <div class="section">表格是内容，不是控件 <span>TABLE / 01</span></div>
+          <div class="table-wrap">
+            <div class="float-tools"><b>表格</b><button>合并</button><button>拆分</button><button>删行</button><button>删列</button></div>
+            <table>
+              <thead><tr><th colspan="2">编辑动作</th><th>结果</th></tr></thead>
+              <tbody>
+                <tr><td rowspan="2">表格</td><td>合并选择的单元格</td><td>保留段落结构</td></tr>
+                <tr><td>拆分合并单元格</td><td>恢复独立单元格</td></tr>
+                <tr><td colspan="3"><p>按 Enter 创建新段落。</p><p>按 Shift+Enter 插入换行，不改变段落结构。</p></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="quote">“专注不是把界面变空，而是把注意力从工具移回句子。”</div>
+          <div class="section">三个可见状态 <span>STATUS</span></div>
+          <p class="body">当前文件、保存状态、未保存修改。它们足够小，不会打断阅读；也足够清楚，不需要寻找。</p>
+          <figure class="figure"><div class="art"></div><figcaption>fig. 02 — 一条窄边，留下方向感</figcaption></figure>
+        </article>
+      </div>
+    </section>
+  </main>
+  <footer class="statusbar">
+    <div class="status-left"><b>编辑体验札记.md</b><span>Markdown</span><span>已保存</span></div>
+    <div class="status-right"><span>2,184 字</span><span>12 分钟</span><span>UTF-8</span><span>11:49</span></div>
+  </footer>
+</div>
+</body>
+</html>
