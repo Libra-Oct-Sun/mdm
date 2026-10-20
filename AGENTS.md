@@ -27,6 +27,7 @@ workspace before invoking `go` or `wails`.
 - `main.go`: Wails window, embedded assets, drag/drop and asset-server wiring.
 - `app.go`: bound desktop API, dialogs, dirty-close guard and local image server.
 - `markdown.go`: renderer and outline extraction.
+- `htmltable.go`: whitelist sanitizer and renderer for rich HTML tables.
 - `files.go`: UTF-8 reading and atomic saving.
 - `scripts/generate_icon.py`: regenerates `build/appicon.png` and the Windows
   multi-size `.ico` from the app's jade/cinnabar visual language.
@@ -40,6 +41,8 @@ workspace before invoking `go` or `wails`.
 - Keep filesystem access in Go. The frontend calls bound methods instead of using
   browser file APIs.
 - Preview HTML must remain safe: do not enable Goldmark's unsafe HTML mode.
+- Complex tables may use the whitelisted HTML table subset rendered by
+  `htmltable.go`; keep scripts, event attributes and unsanitized styles out.
 - Relative images are served only from the current document's directory. Keep the
   path traversal checks in `App.ServeHTTP`.
 - Save documents as UTF-8 with normalized LF newlines. Never truncate a file

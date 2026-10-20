@@ -12,7 +12,9 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer"
 	"github.com/yuin/goldmark/text"
+	goldmarkutil "github.com/yuin/goldmark/util"
 )
 
 // Heading is one entry in the document outline.
@@ -41,6 +43,11 @@ func renderMarkdown(content, baseDir string) RenderResult {
 		),
 		goldmark.WithParserOptions(
 			parser.WithAutoHeadingID(),
+		),
+		goldmark.WithRendererOptions(
+			renderer.WithNodeRenderers(
+				goldmarkutil.Prioritized(&safeHTMLTableRenderer{}, 100),
+			),
 		),
 	)
 

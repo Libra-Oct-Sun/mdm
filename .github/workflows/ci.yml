@@ -62,6 +62,7 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           node --check frontend/src/markdown-serializer.js
+          node --check frontend/src/editor-tables.js
           node --check frontend/src/editor-search.js
           node --check frontend/src/main.js
 

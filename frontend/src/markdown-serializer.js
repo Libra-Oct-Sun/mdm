@@ -187,9 +187,10 @@
                     output += text || escapeInlineText(href);
                 }
             } else if (tag === "IMG") {
-                const source = node.dataset.mdSrc || node.getAttribute("src") || "";
+                const { source, title } = imageInfo(node);
                 const alt = String(node.getAttribute("alt") || "").replace(/[[\]\\]/g, "\\$&");
-                output += `![${alt}](${formatDestination(source)})`;
+                const titlePart = title ? ` "${escapeTitle(title)}"` : "";
+                output += `![${alt}](${formatDestination(source)}${titlePart})`;
             } else if (tag === "INPUT") {
                 continue;
             } else if (tag === "SPAN") {
@@ -267,6 +268,62 @@
         return destination;
     }
 
+    function normalizeImageDimension(value) {
+        const parsed = Number.parseInt(value, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? String(parsed) : "";
+    }
+
+    function parseImageTitle(value) {
+        const title = String(value || "");
+        const match = title.match(/^=(\d*)x(\d*)(?:\s*\|\s*(.*))?$/);
+        if (!match) {
+            return { width: "", height: "", caption: title, hasSize: false };
+        }
+        const width = normalizeImageDimension(match[1]);
+        const height = normalizeImageDimension(match[2]);
+        return {
+            width,
+            height,
+            caption: match[3] || "",
+            hasSize: Boolean(width || height),
+        };
+    }
+
+    function formatImageTitle(width, height, caption = "") {
+        const normalizedWidth = normalizeImageDimension(width);
+        const normalizedHeight = normalizeImageDimension(height);
+        const text = String(caption || "").trim();
+        if (!normalizedWidth && !normalizedHeight) {
+            return text;
+        }
+        const marker = `=${normalizedWidth}x${normalizedHeight}`;
+        return text ? `${marker} | ${text}` : marker;
+    }
+
+    function imageInfo(node) {
+        const source = node.dataset.mdSrc || node.getAttribute("src") || "";
+        let caption = node.dataset.mdTitle;
+        let width = node.dataset.mdWidth;
+        let height = node.dataset.mdHeight;
+        if (!node.hasAttribute("data-md-title")) {
+            const parsed = parseImageTitle(node.getAttribute("title") || "");
+            caption = parsed.caption;
+            width = width || parsed.width;
+            height = height || parsed.height;
+        }
+        return {
+            source,
+            title: formatImageTitle(width, height, caption),
+        };
+    }
+
+    function escapeTitle(value) {
+        return String(value)
+            .replace(/\\/g, "\\\\")
+            .replace(/"/g, '\\"')
+            .replace(/\r?\n/g, " ");
+    }
+
     function serializeCodeBlock(pre) {
         const clone = pre.cloneNode(true);
         clone.querySelectorAll(".code-copy").forEach((node) => node.remove());
@@ -285,6 +342,30 @@
     }
 
     function serializeTable(table) {
+        if (needsHTMLTable(table)) {
+            return serializeHTMLTable(table);
+        }
+        return serializeGFMTable(table);
+    }
+
+    function needsHTMLTable(table) {
+        if (table.querySelector("caption, colgroup, tfoot")) {
+            return true;
+        }
+        return Array.from(table.querySelectorAll("th, td")).some((cell) => {
+            if ((cell.rowSpan || 1) > 1 || (cell.colSpan || 1) > 1) {
+                return true;
+            }
+            if (Array.from(cell.childNodes).some((node) => {
+                return node.nodeType === ELEMENT_NODE && BLOCK_TAGS.has(node.tagName);
+            })) {
+                return true;
+            }
+            return Boolean(cell.querySelector("p, div, ul, ol, blockquote, pre, table, hr, h1, h2, h3, h4, h5, h6"));
+        });
+    }
+
+    function serializeGFMTable(table) {
         const rows = Array.from(table.rows);
         if (!rows.length) {
             return "";
@@ -324,6 +405,255 @@
         return lines.join("\n");
     }
 
+    function serializeHTMLTable(table) {
+        const rows = Array.from(table.rows);
+        if (!rows.length) {
+            return "";
+        }
+        const headRows = table.tHead ? Array.from(table.tHead.rows) : [rows[0]];
+        const bodyRows = table.tHead
+            ? Array.from(table.tBodies).flatMap((body) => Array.from(body.rows))
+            : rows.slice(1);
+        const footRows = table.tFoot ? Array.from(table.tFoot.rows) : [];
+        const caption = Array.from(table.children).find((node) => node.tagName === "CAPTION");
+        const colgroup = Array.from(table.children).find((node) => node.tagName === "COLGROUP");
+        let output = "<table>";
+        if (caption) {
+            output += `<caption>${serializeHTMLInlineNodes(caption.childNodes)}</caption>`;
+        }
+        if (colgroup) {
+            output += serializeHTMLColgroup(colgroup);
+        }
+        output += `<thead>${headRows.map((row) => serializeHTMLRow(row, true)).join("")}</thead>`;
+        if (bodyRows.length) {
+            output += `<tbody>${bodyRows.map((row) => serializeHTMLRow(row, false)).join("")}</tbody>`;
+        }
+        if (footRows.length) {
+            output += `<tfoot>${footRows.map((row) => serializeHTMLRow(row, false)).join("")}</tfoot>`;
+        }
+        return `${output}</table>`;
+    }
+
+    function serializeHTMLColgroup(colgroup) {
+        const columns = Array.from(colgroup.children)
+            .filter((node) => node.tagName === "COL")
+            .map((column) => {
+                const span = Number.parseInt(column.getAttribute("span") || "1", 10);
+                const width = column.getAttribute("width") || "";
+                const attributes = [];
+                if (Number.isFinite(span) && span > 1) {
+                    attributes.push(`span="${span}"`);
+                }
+                if (width) {
+                    attributes.push(`width="${escapeHTMLAttribute(width)}"`);
+                }
+                return `<col${attributes.length ? ` ${attributes.join(" ")}` : ""}>`;
+            })
+            .join("");
+        return columns ? `<colgroup>${columns}</colgroup>` : "";
+    }
+
+    function serializeHTMLRow(row, header = false) {
+        return `<tr>${Array.from(row.cells)
+            .map((cell) => serializeHTMLCell(cell, header))
+            .join("")}</tr>`;
+    }
+
+    function serializeHTMLCell(cell, header = false) {
+        const tag = header || cell.tagName.toLowerCase() === "th" ? "th" : "td";
+        const attributes = [];
+        if ((cell.colSpan || 1) > 1) {
+            attributes.push(`colspan="${cell.colSpan}"`);
+        }
+        if ((cell.rowSpan || 1) > 1) {
+            attributes.push(`rowspan="${cell.rowSpan}"`);
+        }
+        const align = (cell.style.textAlign || cell.getAttribute("align") || "").toLowerCase();
+        if (["left", "center", "right"].includes(align)) {
+            attributes.push(`align="${align}"`);
+        }
+        return `<${tag}${attributes.length ? ` ${attributes.join(" ")}` : ""}>` +
+            `${serializeHTMLCellContent(cell)}</${tag}>`;
+    }
+
+    function serializeHTMLCellContent(cell) {
+        const children = Array.from(cell.childNodes);
+        const hasBlocks = children.some((node) => {
+            return node.nodeType === ELEMENT_NODE && BLOCK_TAGS.has(node.tagName);
+        });
+        return hasBlocks
+            ? serializeHTMLBlockNodes(children)
+            : serializeHTMLInlineNodes(children).trim();
+    }
+
+    function serializeHTMLBlockNodes(nodes) {
+        let output = "";
+        let inline = [];
+        const flushInline = () => {
+            if (!inline.length) {
+                return;
+            }
+            const html = serializeHTMLInlineNodes(inline).trim();
+            if (html) {
+                output += `<p>${html}</p>`;
+            }
+            inline = [];
+        };
+        for (const node of nodes) {
+            if (node.nodeType === TEXT_NODE) {
+                if (node.nodeValue.trim()) {
+                    inline.push(node);
+                }
+                continue;
+            }
+            if (node.nodeType !== ELEMENT_NODE || isIgnoredNode(node)) {
+                continue;
+            }
+            if (BLOCK_TAGS.has(node.tagName)) {
+                flushInline();
+                output += serializeHTMLBlock(node);
+            } else {
+                inline.push(node);
+            }
+        }
+        flushInline();
+        return output;
+    }
+
+    function serializeHTMLBlock(node) {
+        const tag = node.tagName;
+        if (/^H[1-6]$/.test(tag)) {
+            return `<${tag.toLowerCase()}>${serializeHTMLInlineNodes(node.childNodes).trim()}</${tag.toLowerCase()}>`;
+        }
+        if (tag === "P") {
+            return `<p>${serializeHTMLInlineNodes(node.childNodes).trim()}</p>`;
+        }
+        if (tag === "DIV" || tag === "SECTION" || tag === "ARTICLE") {
+            return Array.from(node.children).some((child) => BLOCK_TAGS.has(child.tagName))
+                ? serializeHTMLBlockNodes(node.childNodes)
+                : `<p>${serializeHTMLInlineNodes(node.childNodes).trim()}</p>`;
+        }
+        if (tag === "UL" || tag === "OL") {
+            return serializeHTMLList(node);
+        }
+        if (tag === "BLOCKQUOTE") {
+            return `<blockquote>${serializeHTMLBlockNodes(node.childNodes)}</blockquote>`;
+        }
+        if (tag === "PRE") {
+            const code = node.querySelector("code");
+            const className = code?.className || "";
+            const language = className.match(/language-([\w-]+)/)?.[1] || "";
+            const value = (code ? code.textContent : node.textContent)
+                .replace(/\r\n?/g, "\n")
+                .replace(/^\n+|\n+$/g, "");
+            return `<pre><code${language ? ` class="language-${language}"` : ""}>${escapeHTML(value)}</code></pre>`;
+        }
+        if (tag === "TABLE") {
+            return serializeHTMLTable(node);
+        }
+        if (tag === "HR") {
+            return "<hr>";
+        }
+        return serializeHTMLInlineNodes([node]);
+    }
+
+    function serializeHTMLList(list) {
+        const tag = list.tagName.toLowerCase();
+        const start = Number.parseInt(list.getAttribute("start") || "1", 10);
+        const startAttribute = tag === "ol" && Number.isFinite(start) && start !== 1
+            ? ` start="${start}"`
+            : "";
+        const items = Array.from(list.children)
+            .filter((child) => child.tagName === "LI")
+            .map((item) => `<li>${serializeHTMLListItem(item)}</li>`)
+            .join("");
+        return `<${tag}${startAttribute}>${items}</${tag}>`;
+    }
+
+    function serializeHTMLListItem(item) {
+        const children = Array.from(item.childNodes);
+        const hasBlocks = children.some((node) => {
+            return node.nodeType === ELEMENT_NODE && BLOCK_TAGS.has(node.tagName);
+        });
+        return hasBlocks
+            ? serializeHTMLBlockNodes(children)
+            : serializeHTMLInlineNodes(children).trim();
+    }
+
+    function serializeHTMLInlineNodes(nodes) {
+        let output = "";
+        for (const node of nodes) {
+            if (node.nodeType === TEXT_NODE) {
+                output += escapeHTML(node.nodeValue).replace(/\n/g, "<br>");
+                continue;
+            }
+            if (node.nodeType !== ELEMENT_NODE || isIgnoredNode(node)) {
+                continue;
+            }
+            const tag = node.tagName;
+            if (tag === "BR") {
+                output += "<br>";
+            } else if (tag === "STRONG" || tag === "B") {
+                output += `<strong>${serializeHTMLInlineNodes(node.childNodes)}</strong>`;
+            } else if (tag === "EM" || tag === "I") {
+                output += `<em>${serializeHTMLInlineNodes(node.childNodes)}</em>`;
+            } else if (tag === "DEL" || tag === "S" || tag === "STRIKE") {
+                output += `<del>${serializeHTMLInlineNodes(node.childNodes)}</del>`;
+            } else if (tag === "CODE") {
+                output += `<code>${escapeHTML(node.textContent || "")}</code>`;
+            } else if (tag === "A") {
+                const href = node.getAttribute("href") || "";
+                const title = node.getAttribute("title") || "";
+                output += `<a href="${escapeHTMLAttribute(href)}"` +
+                    `${title ? ` title="${escapeHTMLAttribute(title)}"` : ""}>` +
+                    `${serializeHTMLInlineNodes(node.childNodes)}</a>`;
+            } else if (tag === "IMG") {
+                const { source, title } = imageInfo(node);
+                output += `<img src="${escapeHTMLAttribute(source)}"` +
+                    ` alt="${escapeHTMLAttribute(node.getAttribute("alt") || "")}"` +
+                    `${title ? ` title="${escapeHTMLAttribute(title)}"` : ""}>`;
+            } else if (tag === "INPUT") {
+                if ((node.getAttribute("type") || "").toLowerCase() === "checkbox") {
+                    output += `<input type="checkbox"${node.checked ? " checked" : ""}>`;
+                }
+            } else if (tag === "SPAN") {
+                let inner = serializeHTMLInlineNodes(node.childNodes);
+                const weight = String(node.style.fontWeight || "").toLowerCase();
+                const bold = weight === "bold" || Number.parseInt(weight, 10) >= 600;
+                const italic = String(node.style.fontStyle || "").toLowerCase() === "italic";
+                const strike = String(node.style.textDecoration || "").includes("line-through");
+                if (bold && !node.parentElement?.closest("strong, b")) {
+                    inner = `<strong>${inner}</strong>`;
+                }
+                if (italic && !node.parentElement?.closest("em, i")) {
+                    inner = `<em>${inner}</em>`;
+                }
+                if (strike && !node.parentElement?.closest("del, s, strike")) {
+                    inner = `<del>${inner}</del>`;
+                }
+                output += inner;
+            } else if (tag === "U" || tag === "MARK" || tag === "SUP" || tag === "SUB") {
+                output += `<${tag.toLowerCase()}>${serializeHTMLInlineNodes(node.childNodes)}</${tag.toLowerCase()}>`;
+            } else {
+                output += serializeHTMLInlineNodes(node.childNodes);
+            }
+        }
+        return output;
+    }
+
+    function escapeHTML(value) {
+        return String(value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    }
+
+    function escapeHTMLAttribute(value) {
+        return escapeHTML(value)
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
     function findOwnCheckbox(listItem) {
         for (const child of listItem.childNodes) {
             if (child.nodeType !== ELEMENT_NODE) {
@@ -351,7 +681,10 @@
 
     return {
         findOwnCheckbox,
+        formatImageTitle,
         isIgnoredNode,
+        normalizeImageDimension,
+        parseImageTitle,
         serializeEditor,
         serializeBlocks,
     };

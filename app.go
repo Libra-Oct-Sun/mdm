@@ -116,6 +116,21 @@ func (a *App) ResetDocument() {
 	a.mu.Unlock()
 }
 
+// SetActiveDocument points path-dependent services at the active editor tab.
+// Dirty state is tracked separately because more than one tab may have changes.
+func (a *App) SetActiveDocument(path string) {
+	path = strings.TrimSpace(path)
+	if path != "" {
+		if absolute, err := filepath.Abs(path); err == nil {
+			path = absolute
+		}
+	}
+
+	a.mu.Lock()
+	a.docPath = path
+	a.mu.Unlock()
+}
+
 // QuitApp bypasses the dirty guard after the user has made a decision.
 func (a *App) QuitApp() {
 	a.mu.Lock()
@@ -153,8 +168,6 @@ func (a *App) OpenPath(path string) (*Document, error) {
 
 	a.mu.Lock()
 	a.docPath = doc.Path
-	a.dirty = false
-	a.closePrompt = false
 	a.mu.Unlock()
 
 	return doc, nil
@@ -163,13 +176,13 @@ func (a *App) OpenPath(path string) (*Document, error) {
 // SaveDocument writes content to path. An empty path opens the Save As dialog.
 func (a *App) SaveDocument(path, content string) (*SaveResult, error) {
 	if strings.TrimSpace(path) == "" {
-		return a.SaveDocumentAs(content)
+		return a.SaveDocumentAs(content, nil)
 	}
 	return a.saveToPath(path, content)
 }
 
 // SaveDocumentAs always prompts for a destination.
-func (a *App) SaveDocumentAs(content string) (*SaveResult, error) {
+func (a *App) SaveDocumentAs(content string, openPaths []string) (*SaveResult, error) {
 	a.mu.RLock()
 	currentPath := a.docPath
 	a.mu.RUnlock()
@@ -196,16 +209,20 @@ func (a *App) SaveDocumentAs(content string) (*SaveResult, error) {
 	if strings.TrimSpace(path) == "" {
 		return &SaveResult{Canceled: true}, nil
 	}
+	if pathAlreadyOpen(path, openPaths) {
+		return nil, errors.New("该文件已在另一个标签中打开，请先关闭它或选择其他文件名")
+	}
 	return a.saveToPath(path, content)
 }
 
 // SaveRecoveryDraft persists the latest unsaved editor snapshot.
-func (a *App) SaveRecoveryDraft(path, name, content, baseContent string) error {
+func (a *App) SaveRecoveryDraft(id, path, name, content, baseContent string) error {
 	dir, err := recoveryDirectory()
 	if err != nil {
 		return err
 	}
 	return saveRecoveryDraft(dir, &RecoveryDraft{
+		ID:          id,
 		Path:        path,
 		Name:        name,
 		Content:     content,
@@ -213,29 +230,40 @@ func (a *App) SaveRecoveryDraft(path, name, content, baseContent string) error {
 	})
 }
 
-// LoadRecoveryDraft returns an unsaved snapshot left by a previous session.
-func (a *App) LoadRecoveryDraft() (*RecoveryDraft, error) {
+// LoadRecoveryDrafts returns the unsaved snapshots left by a previous session.
+func (a *App) LoadRecoveryDrafts() ([]*RecoveryDraft, error) {
 	dir, err := recoveryDirectory()
 	if err != nil {
 		return nil, err
 	}
-	return loadRecoveryDraft(dir)
+	return loadRecoveryDrafts(dir)
 }
 
-// ClearRecoveryDraft removes the recovery snapshot after save or discard.
-func (a *App) ClearRecoveryDraft() error {
+// ClearRecoveryDraft removes one recovery snapshot after save or discard.
+func (a *App) ClearRecoveryDraft(id string) error {
 	dir, err := recoveryDirectory()
 	if err != nil {
 		return err
 	}
-	return clearRecoveryDraft(dir)
+	return clearRecoveryDraft(dir, id)
+}
+
+// ClearRecoveryDrafts removes every recovery snapshot after a confirmed quit.
+func (a *App) ClearRecoveryDrafts() error {
+	dir, err := recoveryDirectory()
+	if err != nil {
+		return err
+	}
+	return clearRecoveryDrafts(dir)
 }
 
 // SavePastedImage stores clipboard image data beside the current document.
-func (a *App) SavePastedImage(dataURL string) (*SavedImage, error) {
-	a.mu.RLock()
-	docPath := a.docPath
-	a.mu.RUnlock()
+func (a *App) SavePastedImage(dataURL, docPath string) (*SavedImage, error) {
+	if strings.TrimSpace(docPath) == "" {
+		a.mu.RLock()
+		docPath = a.docPath
+		a.mu.RUnlock()
+	}
 	return savePastedImage(docPath, dataURL)
 }
 
@@ -255,11 +283,34 @@ func (a *App) saveToPath(path, content string) (*SaveResult, error) {
 
 	a.mu.Lock()
 	a.docPath = absPath
-	a.dirty = false
-	a.closePrompt = false
 	a.mu.Unlock()
 
 	return &SaveResult{Path: absPath, Name: filepath.Base(absPath)}, nil
+}
+
+func pathAlreadyOpen(path string, openPaths []string) bool {
+	target := normalizedOpenPath(path)
+	if target == "" {
+		return false
+	}
+	for _, candidate := range openPaths {
+		open := normalizedOpenPath(candidate)
+		if open != "" && strings.EqualFold(open, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedOpenPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if absolute, err := filepath.Abs(path); err == nil {
+		path = absolute
+	}
+	return filepath.Clean(path)
 }
 
 // RenderMarkdown converts the current buffer into safe HTML and an outline.
@@ -276,7 +327,7 @@ func (a *App) RenderMarkdown(content string) RenderResult {
 }
 
 // ResolveDocumentLink turns a relative Markdown link into an absolute file path.
-func (a *App) ResolveDocumentLink(href string) (string, error) {
+func (a *App) ResolveDocumentLink(href, basePath string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(href))
 	if err != nil {
 		return "", fmt.Errorf("链接格式无效：%w", err)
@@ -296,9 +347,12 @@ func (a *App) ResolveDocumentLink(href string) (string, error) {
 	}
 
 	if !filepath.IsAbs(relative) {
-		a.mu.RLock()
-		docPath := a.docPath
-		a.mu.RUnlock()
+		docPath := strings.TrimSpace(basePath)
+		if docPath == "" {
+			a.mu.RLock()
+			docPath = a.docPath
+			a.mu.RUnlock()
+		}
 		if docPath == "" {
 			return "", errors.New("请先保存当前文档，再打开相对链接")
 		}

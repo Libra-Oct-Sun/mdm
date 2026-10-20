@@ -38,6 +38,28 @@ test("serializes links and relative images from their Markdown source", () => {
     );
 });
 
+test("serializes image dimensions and alt text as a reversible title", () => {
+    const editor = editorWith(
+        '<p><img data-md-src="images/chart.png" alt="趋势图" data-md-width="320" data-md-height="180"></p>',
+    );
+
+    assert.equal(
+        serializer.serializeEditor(editor),
+        '![趋势图](images/chart.png "=320x180")\n',
+    );
+});
+
+test("parses image dimensions and an optional caption from the title marker", () => {
+    assert.deepEqual(
+        serializer.parseImageTitle('=320x180 | 图注'),
+        { width: "320", height: "180", caption: "图注", hasSize: true },
+    );
+    assert.deepEqual(
+        serializer.parseImageTitle("普通标题"),
+        { width: "", height: "", caption: "普通标题", hasSize: false },
+    );
+});
+
 test("serializes nested and task lists", () => {
     const editor = editorWith(
         '<ul><li><input type="checkbox" checked> 完成</li><li>Parent<ul><li>Child</li></ul></li></ul>',
@@ -73,6 +95,33 @@ test("serializes table alignment and escaped cell content", () => {
         serializer.serializeEditor(editor),
         "| A | B |\n| :---: | --- |\n| x\\|y | **z** |\n",
     );
+});
+
+test("serializes merged and multi-paragraph tables as a single HTML block", () => {
+    const editor = editorWith(
+        '<table><thead><tr><th colspan="2">合并表头</th></tr></thead>' +
+        '<tbody><tr><td rowspan="2"><p>第一段</p><p>第二段</p></td><td>B</td></tr>' +
+        '<tr><td>C</td></tr></tbody></table>',
+    );
+
+    const markdown = serializer.serializeEditor(editor);
+
+    assert.match(markdown, /^<table>/);
+    assert.match(markdown, /<th colspan="2">合并表头<\/th>/);
+    assert.match(markdown, /<td rowspan="2"><p>第一段<\/p><p>第二段<\/p><\/td>/);
+    assert.doesNotMatch(markdown, /\n\n/, "HTML table must not contain blank lines");
+});
+
+test("serializes block content and images inside HTML table cells", () => {
+    const editor = editorWith(
+        '<table><tbody><tr><td><p>说明</p><ul><li>第一项</li></ul>' +
+        '<p><img data-md-src="images/a.png" alt="图" data-md-width="240"></p></td></tr></tbody></table>',
+    );
+
+    const markdown = serializer.serializeEditor(editor);
+
+    assert.match(markdown, /<p>说明<\/p><ul><li>第一项<\/li><\/ul>/);
+    assert.match(markdown, /<img src="images\/a.png" alt="图" title="=240x">/);
 });
 
 test("serializes blockquotes, horizontal rules and ignores buttons", () => {

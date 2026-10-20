@@ -11,6 +11,10 @@
     }
     const findOwnCheckbox = markdownSerializer.findOwnCheckbox;
     const isIgnoredNode = markdownSerializer.isIgnoredNode;
+    const tableTools = window.MdmuderTables;
+    if (!tableTools) {
+        throw new Error("Table editor tools failed to load");
+    }
     const editorSearch = window.MdmuderSearch;
     if (!editorSearch) {
         throw new Error("Editor search failed to load");
@@ -25,7 +29,8 @@
         "P", "DIV", "BR", "H1", "H2", "H3", "H4", "H5", "H6",
         "STRONG", "B", "EM", "I", "DEL", "S", "STRIKE",
         "CODE", "PRE", "A", "IMG", "UL", "OL", "LI", "BLOCKQUOTE",
-        "TABLE", "THEAD", "TBODY", "TR", "TH", "TD", "INPUT", "HR",
+        "TABLE", "CAPTION", "COLGROUP", "COL", "THEAD", "TBODY", "TFOOT",
+        "TR", "TH", "TD", "INPUT", "HR",
         "SPAN", "U", "MARK", "SUP", "SUB",
     ]);
     const BLOCKED_PASTE_TAGS = new Set([
@@ -40,7 +45,7 @@
         "",
         "## 从这里开始",
         "",
-        "- 使用顶部的 **打开** 载入已有 `.md` 文件",
+        "- 使用顶部的 **打开** 载入已有 `.md` 文件，继续打开会保留为新标签页",
         "- 直接把 Markdown 文件拖进窗口",
         "- 按 `Ctrl+S` 保存，按 `Ctrl+Shift+S` 另存为",
         "",
@@ -99,8 +104,16 @@
         findQuery: "",
     };
 
+    const tabs = [];
+    let activeTabId = "";
+    let tabCounter = 0;
+    let recoveryIdCounter = 0;
+    let tabsRenderKey = "";
+    let tabOperationQueue = Promise.resolve();
+
     const el = {
         app: $("#app"),
+        tabList: $("#tabList"),
         docIdentity: $("#docIdentity"),
         docTitle: $("#docTitle"),
         docPath: $("#docPath"),
@@ -121,6 +134,7 @@
         modalTitle: $("#modalTitle"),
         modalMessage: $("#modalMessage"),
         modalActions: $("#modalActions"),
+        contextToolbar: $("#contextToolbar"),
         moreMenu: $("#moreMenu"),
         btnMore: $("#btnMore"),
         findBar: $("#findBar"),
@@ -129,7 +143,7 @@
         findCount: $("#findCount"),
     };
 
-    const history = {
+    let history = {
         undo: [],
         redo: [],
         current: null,
@@ -143,8 +157,12 @@
     let selectionFrame = 0;
     let scrollFrame = 0;
     let dragDepth = 0;
-    let recoveryTimer = 0;
-    let recoverySavedKey = "";
+    let selectedImage = null;
+    let contextAnchor = null;
+    let contextReturnRange = null;
+    const recoveryTimers = new Map();
+    const recoverySavedKeys = new Map();
+    let recoveryGeneration = 0;
     let recoveryWarningShown = false;
 
     async function init() {
@@ -155,7 +173,7 @@
         applyFontSize(state.fontSize, false);
         setSidebar(state.sidebar, false);
 
-        await loadDocument(
+        await addDocumentTab(
             { path: "", name: "未命名.md", content: WELCOME, size: WELCOME.length },
             { focus: false, announce: false }
         );
@@ -164,7 +182,7 @@
         if (startupPath) {
             const doc = await safeCall("OpenPath", startupPath);
             if (doc) {
-                await loadDocument(doc, { focus: true, announce: true });
+                await addDocumentTab(doc, { focus: true, announce: true, replacePristine: true });
             }
         }
         await maybeRestoreRecoveryDraft();
@@ -211,8 +229,33 @@
             setTheme(state.theme === "dark" ? "light" : "dark");
         });
         $("#btnOpen").addEventListener("click", openDocument);
+        $("#btnNewTab").addEventListener("click", () => newDocument());
         $("#btnSave").addEventListener("click", () => saveDocument(false));
         $("#btnFind").addEventListener("click", openFind);
+
+        el.tabList.addEventListener("click", (event) => {
+            const closeButton = event.target.closest("[data-tab-close]");
+            if (closeButton) {
+                event.stopPropagation();
+                closeTab(closeButton.dataset.tabClose);
+                return;
+            }
+            const tabButton = event.target.closest("[data-tab-id]");
+            if (tabButton) {
+                activateTab(tabButton.dataset.tabId);
+            }
+        });
+        el.tabList.addEventListener("auxclick", (event) => {
+            if (event.button !== 1) {
+                return;
+            }
+            const tabButton = event.target.closest("[data-tab-id]");
+            if (tabButton) {
+                event.preventDefault();
+                closeTab(tabButton.dataset.tabId);
+            }
+        });
+        el.tabList.addEventListener("keydown", handleTabStripKeydown);
 
         el.btnMore.addEventListener("click", (event) => {
             event.stopPropagation();
@@ -239,9 +282,13 @@
         el.editor.addEventListener("keydown", handleEditorKeydown);
         el.editor.addEventListener("paste", handlePaste);
         el.editor.addEventListener("click", handleEditorClick);
+        el.editor.addEventListener("dblclick", handleEditorDoubleClick);
         el.editor.addEventListener("blur", () => {
             scheduledSelectionUpdate();
         });
+        el.contextToolbar.addEventListener("mousedown", (event) => event.preventDefault());
+        el.contextToolbar.addEventListener("click", handleContextToolbarClick);
+        el.contextToolbar.addEventListener("keydown", handleContextToolbarKeydown);
         document.addEventListener("selectionchange", () => {
             if (selectionInEditor()) {
                 scheduledSelectionUpdate();
@@ -256,6 +303,7 @@
             scrollFrame = requestAnimationFrame(() => {
                 scrollFrame = 0;
                 updateActiveHeadingFromScroll();
+                updateContextToolbar();
             });
         });
 
@@ -348,7 +396,313 @@
         }
     }
 
-    async function loadDocument(doc, options = {}) {
+    function activeTab() {
+        return tabs.find((tab) => tab.id === activeTabId) || null;
+    }
+
+    function tabById(id) {
+        return tabs.find((tab) => tab.id === id) || null;
+    }
+
+    function queueTabOperation(operation) {
+        const run = tabOperationQueue.then(operation, operation).catch((error) => {
+            toast(errorText(error), "error");
+        });
+        tabOperationQueue = run;
+        return run;
+    }
+
+    function newRecoveryId() {
+        recoveryIdCounter += 1;
+        const random = Math.random().toString(36).slice(2, 8);
+        return `draft-${Date.now().toString(36)}-${random}-${recoveryIdCounter}`;
+    }
+
+    function createTab(doc) {
+        const content = typeof doc.content === "string" ? doc.content : "";
+        const path = doc.path || "";
+        return {
+            id: `document-${++tabCounter}`,
+            path,
+            name: doc.name || (path ? fileNameFromPath(path) : "未命名.md"),
+            source: content,
+            savedContent: content,
+            dirty: false,
+            html: "",
+            scrollTop: 0,
+            selection: null,
+            history: null,
+            recoveryId: doc.recoveryId || newRecoveryId(),
+            loading: false,
+            removed: false,
+            recoveryVersion: 0,
+        };
+    }
+
+    function isPristineTab(tab) {
+        return Boolean(tab) && !tab.path && !tab.dirty && (tab.source === "" || tab.source === WELCOME);
+    }
+
+    function pathKey(path) {
+        return path ? path.replace(/\\/g, "/").toLowerCase() : "";
+    }
+
+    function findTabByPath(path) {
+        const key = pathKey(path);
+        return key ? tabs.find((tab) => pathKey(tab.path) === key) || null : null;
+    }
+
+    function nextUntitledName() {
+        const names = new Set(tabs.map((tab) => tab.name));
+        if (!names.has("未命名.md")) {
+            return "未命名.md";
+        }
+        let index = 2;
+        while (names.has(`未命名 ${index}.md`)) {
+            index += 1;
+        }
+        return `未命名 ${index}.md`;
+    }
+
+    function syncActiveTabFields(tab = activeTab()) {
+        if (!tab) {
+            return;
+        }
+        tab.path = state.path;
+        tab.name = state.name;
+        tab.source = state.source;
+        tab.savedContent = state.savedContent;
+        tab.dirty = state.dirty;
+        tab.html = editorSnapshotHTML();
+        tab.scrollTop = el.editorScroll.scrollTop;
+    }
+
+    function captureActiveTab() {
+        const tab = activeTab();
+        if (!tab || tab.loading) {
+            return;
+        }
+        window.clearTimeout(historyTimer);
+        syncSourceNow();
+        recordHistory();
+        tab.selection = getSelectionPaths();
+        tab.history = {
+            undo: history.undo.slice(),
+            redo: history.redo.slice(),
+            current: history.current,
+        };
+        syncActiveTabFields();
+        persistRecoveryDraft(tab.id).catch(() => {});
+    }
+
+    function renderTabs(force = false) {
+        const key = tabs
+            .map((tab) => `${tab.id}\u0000${tab.name}\u0000${tab.path}\u0000${tab.dirty}\u0000${tab.id === activeTabId}`)
+            .join("\u0001");
+        if (!force && key === tabsRenderKey) {
+            return;
+        }
+        tabsRenderKey = key;
+
+        const fragment = document.createDocumentFragment();
+        for (const tab of tabs) {
+            const item = document.createElement("div");
+            item.className = "tab";
+            item.classList.toggle("is-active", tab.id === activeTabId);
+
+            const button = document.createElement("button");
+            button.type = "button";
+            button.id = `tab-button-${tab.id}`;
+            button.className = "tab-main";
+            button.dataset.tabId = tab.id;
+            button.setAttribute("role", "tab");
+            button.setAttribute("aria-selected", String(tab.id === activeTabId));
+            button.setAttribute("aria-controls", "editorPane");
+            button.tabIndex = tab.id === activeTabId ? 0 : -1;
+            button.title = tab.path || tab.name;
+
+            const title = document.createElement("span");
+            title.className = "tab-title";
+            title.textContent = tab.name;
+            button.append(title);
+
+            if (tab.dirty) {
+                const dirty = document.createElement("span");
+                dirty.className = "tab-dirty";
+                dirty.setAttribute("aria-label", "有未保存的更改");
+                button.append(dirty);
+            }
+
+            const close = document.createElement("button");
+            close.type = "button";
+            close.className = "tab-close";
+            close.dataset.tabClose = tab.id;
+            close.title = "关闭标签 (Ctrl+W)";
+            close.setAttribute("aria-label", `关闭 ${tab.name}`);
+            close.textContent = "×";
+
+            item.append(button, close);
+            fragment.append(item);
+        }
+        el.tabList.replaceChildren(fragment);
+
+        const activeButton = el.tabList.querySelector(`[data-tab-id="${activeTabId}"]`);
+        if (activeButton) {
+            el.editorPane.setAttribute("aria-labelledby", activeButton.id);
+            activeButton.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+        } else {
+            el.editorPane.removeAttribute("aria-labelledby");
+        }
+    }
+
+    function addDocumentTab(doc, options = {}) {
+        return queueTabOperation(() => addDocumentTabNow(doc, options));
+    }
+
+    async function addDocumentTabNow(doc, options = {}) {
+        const existing = findTabByPath(doc.path);
+        if (existing) {
+            await activateTabNow(existing.id, { focus: options.focus });
+            call("SetDirty", tabs.some((tab) => tab.dirty)).catch(() => {});
+            if (options.announce) {
+                toast(`已切换到 ${existing.name}`, "info");
+            }
+            return existing;
+        }
+
+        const current = activeTab();
+        if (options.replacePristine && isPristineTab(current)) {
+            current.recoveryId = doc.recoveryId || current.recoveryId;
+            current.loading = true;
+            try {
+                await safeCall("SetActiveDocument", doc.path || "");
+                await loadDocument(doc, options, current);
+            } finally {
+                current.loading = false;
+            }
+            return current;
+        }
+
+        captureActiveTab();
+        const tab = createTab(doc);
+        tabs.push(tab);
+        activeTabId = tab.id;
+        tab.loading = true;
+        try {
+            await safeCall("SetActiveDocument", doc.path || "");
+            await loadDocument(doc, options, tab);
+        } finally {
+            tab.loading = false;
+            renderTabs(true);
+        }
+        return tab;
+    }
+
+    function activateTab(id, options = {}) {
+        return queueTabOperation(() => activateTabNow(id, options));
+    }
+
+    async function activateTabNow(id, options = {}) {
+        const target = tabById(id);
+        if (!target) {
+            return;
+        }
+        if (target.id === activeTabId) {
+            if (options.focus !== false) {
+                el.editor.focus();
+            }
+            return;
+        }
+
+        const previousId = activeTabId;
+        captureActiveTab();
+        await safeCall("SetActiveDocument", target.path);
+        if (activeTabId !== previousId) {
+            return;
+        }
+        // The backend call yields to the UI; preserve edits made during it.
+        captureActiveTab();
+        activeTabId = target.id;
+
+        state.path = target.path;
+        state.name = target.name;
+        state.source = target.source;
+        state.savedContent = target.savedContent;
+        state.dirty = target.dirty;
+        state.headings = [];
+        state.activeHeadingId = "";
+        state.findMatches = [];
+        state.findIndex = -1;
+        state.findQuery = "";
+
+        history = {
+            undo: (target.history?.undo || []).slice(),
+            redo: (target.history?.redo || []).slice(),
+            current: target.history?.current || null,
+            timer: 0,
+            restoring: false,
+        };
+
+        el.findBar.hidden = true;
+        el.findInput.value = "";
+        el.findReplaceInput.value = "";
+        el.findCount.textContent = "0 / 0";
+        clearImageSelection();
+        el.editor.innerHTML = target.html || "";
+        postProcessEditor();
+        if (!history.current) {
+            resetHistory();
+        }
+
+        updateEmptyState();
+        updateStats();
+        updateDocumentMeta();
+        refreshOutline();
+        updateBlockStatus();
+        setDirty(target.dirty, true);
+
+        if (options.focus !== false) {
+            restoreSelectionPaths(target.selection?.start, target.selection?.end);
+        }
+        // The editor still holds the previous tab's scroll offset here; do not
+        // write it back into the target tab before restoring the saved value.
+        el.editorScroll.scrollTop = target.scrollTop || 0;
+        renderTabs(true);
+        updateActiveHeadingFromScroll();
+    }
+
+    function switchTab(direction) {
+        if (tabs.length < 2) {
+            return;
+        }
+        const index = Math.max(0, tabs.findIndex((tab) => tab.id === activeTabId));
+        const next = (index + direction + tabs.length) % tabs.length;
+        activateTab(tabs[next].id);
+    }
+
+    function handleTabStripKeydown(event) {
+        const currentButton = event.target.closest("[data-tab-id]");
+        if (!currentButton) {
+            return;
+        }
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+            event.preventDefault();
+            const index = tabs.findIndex((tab) => tab.id === currentButton.dataset.tabId);
+            if (index === -1) {
+                return;
+            }
+            const direction = event.key === "ArrowRight" ? 1 : -1;
+            const next = tabs[(index + direction + tabs.length) % tabs.length];
+            activateTab(next.id, { focus: false }).then(() => {
+                el.tabList.querySelector(`[data-tab-id="${next.id}"]`)?.focus();
+            });
+        } else if (event.key === "Delete") {
+            event.preventDefault();
+            closeTab(currentButton.dataset.tabId);
+        }
+    }
+
+    async function loadDocument(doc, options = {}, targetTab = activeTab()) {
         const content = typeof doc.content === "string" ? doc.content : "";
         state.path = doc.path || "";
         state.name = doc.name || (state.path ? fileNameFromPath(state.path) : "未命名.md");
@@ -357,22 +711,39 @@
         state.dirty = false;
         state.headings = [];
         state.activeHeadingId = "";
+        state.findMatches = [];
+        state.findIndex = -1;
+        state.findQuery = "";
         el.editorScroll.scrollTop = 0;
         el.findBar.hidden = true;
+        el.findInput.value = "";
+        el.findReplaceInput.value = "";
+        el.findCount.textContent = "0 / 0";
+        clearImageSelection();
 
         await renderMarkdownToEditor(content);
         postProcessEditor();
-        resetHistory();
+        if (options.history) {
+            history = options.history;
+        } else {
+            resetHistory();
+        }
         updateEmptyState();
         updateStats();
         updateDocumentMeta();
         refreshOutline();
         updateBlockStatus();
         setDirty(false, true);
+        syncActiveTabFields(targetTab);
+        renderTabs(true);
 
         if (options.focus !== false) {
             el.editor.focus();
-            placeCaretAtStart();
+            if (options.scrollTop) {
+                el.editorScroll.scrollTop = options.scrollTop;
+            } else {
+                placeCaretAtStart();
+            }
         }
         if (options.announce && state.path) {
             toast(`已打开 ${state.name}`, "success");
@@ -438,13 +809,18 @@
                 markdownSource = raw;
             }
             image.dataset.mdSrc = markdownSource;
+            initializeImageMetadata(image);
+            applyImageSize(image, image.dataset.mdWidth || "", image.dataset.mdHeight || "");
             image.contentEditable = "false";
             image.draggable = false;
             image.loading = "lazy";
-            image.title = image.alt || markdownSource;
+            image.title = image.dataset.mdTitle || image.alt || markdownSource;
 
-            if (isRelativeUrl(markdownSource) && state.path && !raw.startsWith("/localfile/")) {
-                image.src = localFileURL(markdownSource);
+            if (isRelativeUrl(markdownSource) && state.path) {
+                const localSource = localFileURL(markdownSource);
+                if (raw !== localSource) {
+                    image.src = localSource;
+                }
             }
             if (!image.dataset.errorBound) {
                 image.dataset.errorBound = "true";
@@ -458,6 +834,39 @@
                 }, { once: true });
             }
         });
+    }
+
+    function initializeImageMetadata(image) {
+        if (image.hasAttribute("data-md-title")) {
+            return;
+        }
+        const parsed = markdownSerializer.parseImageTitle(image.getAttribute("title") || "");
+        image.dataset.mdTitle = parsed.caption;
+        if (parsed.width) {
+            image.dataset.mdWidth = parsed.width;
+        }
+        if (parsed.height) {
+            image.dataset.mdHeight = parsed.height;
+        }
+    }
+
+    function applyImageSize(image, width, height) {
+        const normalizedWidth = markdownSerializer.normalizeImageDimension(width);
+        const normalizedHeight = markdownSerializer.normalizeImageDimension(height);
+        if (normalizedWidth) {
+            image.dataset.mdWidth = normalizedWidth;
+            image.style.width = `${normalizedWidth}px`;
+        } else {
+            image.removeAttribute("data-md-width");
+            image.style.width = "";
+        }
+        if (normalizedHeight) {
+            image.dataset.mdHeight = normalizedHeight;
+            image.style.height = `${normalizedHeight}px`;
+        } else {
+            image.removeAttribute("data-md-height");
+            image.style.height = "";
+        }
     }
 
     function prepareLinks() {
@@ -495,10 +904,21 @@
         window.clearTimeout(historyTimer);
         const selection = getSelectionPaths();
         history.current = {
-            html: el.editor.innerHTML,
+            html: editorSnapshotHTML(),
             start: selection?.start || null,
             end: selection?.end || null,
         };
+    }
+
+    function editorSnapshotHTML() {
+        $$("input[type='checkbox']", el.editor).forEach((checkbox) => {
+            if (checkbox.checked) {
+                checkbox.setAttribute("checked", "");
+            } else {
+                checkbox.removeAttribute("checked");
+            }
+        });
+        return el.editor.innerHTML;
     }
 
     function recordHistory() {
@@ -506,7 +926,7 @@
             return;
         }
         window.clearTimeout(historyTimer);
-        const html = el.editor.innerHTML;
+        const html = editorSnapshotHTML();
         if (!history.current) {
             history.current = { html, start: null, end: null };
             return;
@@ -557,10 +977,11 @@
 
     function restoreHistorySnapshot(snapshot) {
         history.restoring = true;
+        clearImageSelection();
         el.editor.innerHTML = snapshot.html;
         postProcessEditor();
         history.current = {
-            html: el.editor.innerHTML,
+            html: editorSnapshotHTML(),
             start: snapshot.start,
             end: snapshot.end,
         };
@@ -666,6 +1087,9 @@
 
     function handleEditorInput(event) {
         if (history.restoring || (event && event.isComposing)) {
+            return;
+        }
+        if (activeTab()?.loading) {
             return;
         }
         if (applyBlockMarkdownShortcut() || applyInlineMarkdownShortcut()) {
@@ -810,9 +1234,13 @@
     function setDirty(value, force = false) {
         const changed = Boolean(value) !== state.dirty;
         state.dirty = Boolean(value);
+        const tab = activeTab();
+        if (tab) {
+            tab.dirty = state.dirty;
+        }
         updateDocumentMeta();
         if (changed || force) {
-            call("SetDirty", state.dirty).catch(() => {});
+            call("SetDirty", tabs.some((item) => item.dirty)).catch(() => {});
         }
         if (state.dirty) {
             scheduleRecoveryDraft();
@@ -820,67 +1248,132 @@
     }
 
     async function maybeRestoreRecoveryDraft() {
-        const draft = await safeCall("LoadRecoveryDraft");
-        if (!draft) {
+        const drafts = await safeCall("LoadRecoveryDrafts");
+        if (!Array.isArray(drafts) || !drafts.length) {
             return;
         }
-        const savedAt = new Date(draft.savedAt);
+        const latest = drafts[drafts.length - 1];
+        const savedAt = new Date(latest.savedAt);
         const when = Number.isNaN(savedAt.getTime()) ? "上次会话" : savedAt.toLocaleString("zh-CN");
+        const message = drafts.length === 1
+            ? `发现“${latest.name || "未命名.md"}”在 ${when} 的未保存内容。恢复后会继续保留原文件，直到你再次保存。`
+            : `发现 ${drafts.length} 个未保存的文档草稿，最近一次保存在 ${when}。恢复后会分别打开为独立标签。`;
         const action = await showModal({
             title: "恢复未保存的草稿？",
-            message: `发现“${draft.name || "未命名.md"}”在 ${when} 的未保存内容。恢复后会继续保留原文件，直到你再次保存。`,
+            message,
             buttons: [
                 { label: "丢弃草稿", value: "discard", kind: "danger" },
                 { label: "恢复", value: "restore", kind: "primary" },
             ],
         });
         if (action !== "restore") {
-            await clearRecoveryDraft();
+            await clearAllRecoveryDrafts();
             return;
         }
 
-        await loadDocument(
-            { path: draft.path || "", name: draft.name || "未命名.md", content: draft.content || "" },
-            { focus: false, announce: false }
-        );
-        state.savedContent = draft.baseContent || "";
-        syncSourceNow();
-        const dirty = state.source !== state.savedContent;
-        setDirty(dirty, true);
-        if (dirty) {
-            scheduleRecoveryDraft();
+        let restored = 0;
+        for (const draft of drafts) {
+            try {
+                await restoreRecoveryDraft(draft, restored === 0);
+                restored += 1;
+            } catch (error) {
+                toast(`恢复草稿失败：${errorText(error)}`, "error");
+            }
+        }
+        if (restored) {
+            toast(restored === 1 ? "已恢复未保存的草稿" : `已恢复 ${restored} 个未保存草稿`, "success");
+        }
+    }
+
+    async function restoreRecoveryDraft(draft, mayReplacePristine) {
+        const content = typeof draft.content === "string" ? draft.content : "";
+        const draftDocument = {
+            path: draft.path || "",
+            name: draft.name || "未命名.md",
+            content,
+            recoveryId: draft.id || newRecoveryId(),
+        };
+        const existing = findTabByPath(draftDocument.path);
+        let tab;
+        if (existing) {
+            await activateTabNow(existing.id, { focus: false });
+            existing.recoveryId = draftDocument.recoveryId;
+            existing.loading = true;
+            try {
+                await loadDocument(draftDocument, { focus: false, announce: false }, existing);
+            } finally {
+                existing.loading = false;
+            }
+            tab = existing;
         } else {
-            await clearRecoveryDraft();
+            tab = await addDocumentTabNow(draftDocument, {
+                focus: false,
+                announce: false,
+                replacePristine: mayReplacePristine,
+            });
+            tab.recoveryId = draftDocument.recoveryId;
         }
-        toast("已恢复未保存的草稿", "success");
+
+        state.savedContent = draft.baseContent || "";
+        const source = syncSourceNow();
+        const dirty = source !== state.savedContent;
+        setDirty(dirty, true);
+        syncActiveTabFields(tab);
+        renderTabs(true);
+        if (dirty) {
+            scheduleRecoveryDraft(tab.id);
+        } else {
+            await clearTabRecoveryDraft(tab);
+        }
     }
 
-    function scheduleRecoveryDraft() {
-        if (!state.dirty) {
+    function scheduleRecoveryDraft(tabId = activeTabId) {
+        const tab = tabById(tabId);
+        if (!tab || !tab.dirty || tab.loading) {
             return;
         }
-        window.clearTimeout(recoveryTimer);
-        recoveryTimer = window.setTimeout(() => {
-            persistRecoveryDraft().catch(() => {});
-        }, 1800);
+        const existing = recoveryTimers.get(tab.id);
+        if (existing) {
+            window.clearTimeout(existing);
+        }
+        recoveryTimers.set(tab.id, window.setTimeout(() => {
+            recoveryTimers.delete(tab.id);
+            persistRecoveryDraft(tab.id).catch(() => {});
+        }, 1800));
     }
 
-    async function persistRecoveryDraft() {
-        if (!state.dirty) {
+    async function persistRecoveryDraft(tabId = activeTabId) {
+        const tab = tabById(tabId);
+        if (!tab || tab.loading) {
             return;
         }
-        const content = syncSourceNow();
-        if (!state.dirty) {
-            await clearRecoveryDraft();
+        if (tab.id === activeTabId) {
+            syncSourceNow();
+            const pending = recoveryTimers.get(tab.id);
+            if (pending) {
+                window.clearTimeout(pending);
+                recoveryTimers.delete(tab.id);
+            }
+        }
+        if (!tab.dirty) {
+            await clearTabRecoveryDraft(tab);
             return;
         }
-        const key = [state.path, state.name, state.savedContent, content].join("\u0000");
-        if (key === recoverySavedKey) {
+
+        const content = tab.source;
+        const key = [tab.path, tab.name, tab.savedContent, content].join("\u0000");
+        if (recoverySavedKeys.get(tab.id) === key) {
             return;
         }
+        const version = tab.recoveryVersion;
+        const generation = recoveryGeneration;
         try {
-            await call("SaveRecoveryDraft", state.path, state.name, content, state.savedContent);
-            recoverySavedKey = key;
+            await call("SaveRecoveryDraft", tab.recoveryId, tab.path, tab.name, content, tab.savedContent);
+            if (tab.removed || version !== tab.recoveryVersion || generation !== recoveryGeneration || !tabById(tab.id)) {
+                await call("ClearRecoveryDraft", tab.recoveryId).catch(() => {});
+                return;
+            }
+            recoverySavedKeys.set(tab.id, key);
         } catch (error) {
             if (!recoveryWarningShown) {
                 recoveryWarningShown = true;
@@ -889,17 +1382,43 @@
         }
     }
 
-    async function clearRecoveryDraft() {
-        window.clearTimeout(recoveryTimer);
-        recoverySavedKey = "";
+    function clearTabRecoveryDraft(tab) {
+        if (!tab) {
+            return Promise.resolve();
+        }
+        const timer = recoveryTimers.get(tab.id);
+        if (timer) {
+            window.clearTimeout(timer);
+        }
+        recoveryTimers.delete(tab.id);
+        recoverySavedKeys.delete(tab.id);
+        tab.recoveryVersion += 1;
+        return call("ClearRecoveryDraft", tab.recoveryId).catch(() => {});
+    }
+
+    async function clearAllRecoveryDrafts() {
+        for (const timer of recoveryTimers.values()) {
+            window.clearTimeout(timer);
+        }
+        recoveryTimers.clear();
+        recoverySavedKeys.clear();
+        recoveryGeneration += 1;
         try {
-            await call("ClearRecoveryDraft");
+            await call("ClearRecoveryDrafts");
         } catch (error) {
-            // A missing recovery file should never block normal document work.
+            // A missing recovery directory should never block document work.
         }
     }
 
     function updateDocumentMeta() {
+        const tab = activeTab();
+        if (tab) {
+            tab.path = state.path;
+            tab.name = state.name;
+            tab.source = state.source;
+            tab.savedContent = state.savedContent;
+            tab.dirty = state.dirty;
+        }
         el.docTitle.textContent = state.name;
         el.docPath.textContent = state.path || "本地草稿，尚未保存";
         el.docIdentity.title = state.path || state.name;
@@ -915,6 +1434,7 @@
         } catch (error) {
             // Ignore failures while the native window is being created.
         }
+        renderTabs();
     }
 
     function updateEmptyState() {
@@ -980,6 +1500,7 @@
             updateBlockStatus();
             updateFormatState();
             updateActiveHeadingFromCaret();
+            updateContextToolbar();
         });
     }
 
@@ -1171,6 +1692,9 @@
                 break;
             case "save-as":
                 saveDocument(true);
+                break;
+            case "close-tab":
+                closeTab();
                 break;
             case "undo":
                 undoEditor();
@@ -1385,6 +1909,7 @@
         if (!selectionInEditor()) {
             return;
         }
+        const tabId = activeTabId;
         const range = captureRange();
         const href = await showInputModal({
             title: "插入链接",
@@ -1395,6 +1920,10 @@
         });
         if (href === null || !href.trim()) {
             restoreRange(range);
+            return;
+        }
+        if (activeTabId !== tabId || !rangeInEditor(range)) {
+            toast("标签已切换，插入链接操作已取消", "info");
             return;
         }
         restoreRange(range);
@@ -1429,6 +1958,7 @@
         if (!selectionInEditor()) {
             return;
         }
+        const tabId = activeTabId;
         const range = captureRange();
         const source = await showInputModal({
             title: "插入图片",
@@ -1439,6 +1969,10 @@
         });
         if (source === null || !source.trim()) {
             restoreRange(range);
+            return;
+        }
+        if (activeTabId !== tabId || !rangeInEditor(range)) {
+            toast("标签已切换，插入图片操作已取消", "info");
             return;
         }
         restoreRange(range);
@@ -1466,6 +2000,73 @@
         selection.removeAllRanges();
         selection.addRange(after);
         afterMutation();
+    }
+
+    async function openImageSettings(image) {
+        if (!image?.isConnected) {
+            return;
+        }
+        initializeImageMetadata(image);
+        const tabId = activeTabId;
+        const result = await showFormModal({
+            title: "图片设置",
+            message: "替代文本用于无障碍阅读；宽高以像素保存，留空表示按原图比例显示。",
+            fields: [
+                {
+                    name: "alt",
+                    label: "替代文本",
+                    value: image.getAttribute("alt") || "",
+                    placeholder: "描述图片内容",
+                },
+                {
+                    name: "width",
+                    label: "宽度（px）",
+                    value: image.dataset.mdWidth || "",
+                    placeholder: "自动",
+                    type: "number",
+                    min: "1",
+                    max: "10000",
+                    step: "1",
+                    inputMode: "numeric",
+                },
+                {
+                    name: "height",
+                    label: "高度（px）",
+                    value: image.dataset.mdHeight || "",
+                    placeholder: "自动",
+                    type: "number",
+                    min: "1",
+                    max: "10000",
+                    step: "1",
+                    inputMode: "numeric",
+                },
+            ],
+            confirmLabel: "应用",
+            validate(values) {
+                return validateImageDimension(values.width, "宽度")
+                    || validateImageDimension(values.height, "高度")
+                    || "";
+            },
+        });
+        if (!result || activeTabId !== tabId || !image.isConnected) {
+            return;
+        }
+        recordHistory();
+        image.setAttribute("alt", result.alt);
+        applyImageSize(image, result.width, result.height);
+        image.title = image.dataset.mdTitle || image.getAttribute("alt") || image.dataset.mdSrc || "";
+        afterMutation();
+    }
+
+    function validateImageDimension(value, label) {
+        const text = String(value || "").trim();
+        if (!text) {
+            return "";
+        }
+        if (!/^\d+$/.test(text) || Number(text) < 1 || Number(text) > 10000) {
+            return `${label}需为 1–10000 之间的整数。`;
+        }
+        return "";
     }
 
     function insertCodeBlock() {
@@ -1527,6 +2128,127 @@
         afterMutation();
     }
 
+    function currentTableCell() {
+        return currentBlockElement()?.closest("td, th") || null;
+    }
+
+    function selectionTableCell(node) {
+        const element = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        return element?.closest?.("td, th") || null;
+    }
+
+    function selectedTableCells() {
+        const selection = window.getSelection();
+        if (!selection || !selection.rangeCount) {
+            return null;
+        }
+        const startCell = selectionTableCell(selection.anchorNode);
+        const endCell = selectionTableCell(selection.focusNode);
+        if (!startCell || !endCell || startCell === endCell) {
+            return null;
+        }
+        const table = startCell.closest("table");
+        if (!table || table !== endCell.closest("table")) {
+            return null;
+        }
+        return { table, startCell, endCell };
+    }
+
+    function selectCellContents(cell) {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+
+    function executeTableAction(action) {
+        const cell = currentTableCell();
+        const table = cell?.closest("table");
+        if (!cell || !table) {
+            return;
+        }
+        recordHistory();
+        if (action === "table-delete") {
+            focusAfterRemovedTable(table);
+            afterMutation();
+            return;
+        }
+
+        let result = null;
+        switch (action) {
+        case "row-above":
+            result = tableTools.insertRow(table, cell, "above");
+            break;
+        case "row-below":
+            result = tableTools.insertRow(table, cell, "below");
+            break;
+        case "row-delete":
+            result = tableTools.deleteRow(table, cell);
+            break;
+        case "col-before":
+            result = tableTools.insertColumn(table, cell, "before");
+            break;
+        case "col-after":
+            result = tableTools.insertColumn(table, cell, "after");
+            break;
+        case "col-delete":
+            result = tableTools.deleteColumn(table, cell);
+            break;
+        case "merge": {
+            const selection = selectedTableCells();
+            if (!selection || selection.table !== table) {
+                toast("请先跨单元格选择要合并的区域", "info");
+                return;
+            }
+            result = tableTools.mergeCells(table, selection.startCell, selection.endCell);
+            break;
+        }
+        case "split":
+            result = tableTools.splitCell(table, cell);
+            break;
+        default:
+            return;
+        }
+
+        if (action === "merge" && !result) {
+            toast("请选择至少两个单元格进行合并", "info");
+            return;
+        }
+        if (action === "split" && !result) {
+            toast("当前单元格没有合并", "info");
+            return;
+        }
+        if (result?.tableRemoved) {
+            focusAfterRemovedTable(table);
+        } else if (result?.cell) {
+            selectCellContents(result.cell);
+        }
+        afterMutation();
+    }
+
+    function focusAfterRemovedTable(table) {
+        const next = table.nextElementSibling;
+        const previous = table.previousElementSibling;
+        table.remove();
+        const selectable = "p,div,h1,h2,h3,h4,h5,h6,li,blockquote,pre,td,th";
+        const target = [next, previous].find((node) => node?.isConnected && node.matches(selectable));
+        if (target) {
+            placeCaretAtStartIn(target);
+            return;
+        }
+        const paragraph = document.createElement("p");
+        paragraph.innerHTML = "<br>";
+        if (next?.isConnected) {
+            next.before(paragraph);
+        } else if (previous?.isConnected) {
+            previous.after(paragraph);
+        } else {
+            el.editor.append(paragraph);
+        }
+        placeCaretAtStartIn(paragraph);
+    }
+
     function insertHorizontalRule() {
         if (!selectionInEditor()) {
             return;
@@ -1547,6 +2269,9 @@
     }
 
     function afterMutation() {
+        if (activeTab()?.loading) {
+            return;
+        }
         postProcessEditor();
         recordHistory();
         updateEmptyState();
@@ -1558,6 +2283,178 @@
         el.editor.focus();
     }
 
+    function updateContextToolbar() {
+        if (state.modalOpen) {
+            hideContextToolbar();
+            return;
+        }
+        const cell = currentTableCell();
+        if (cell) {
+            const mergeButton = $('[data-table-action="merge"]', el.contextToolbar);
+            const splitButton = $('[data-table-action="split"]', el.contextToolbar);
+            if (mergeButton) {
+                mergeButton.disabled = !selectedTableCells();
+            }
+            if (splitButton) {
+                splitButton.disabled = !((cell.rowSpan || 1) > 1 || (cell.colSpan || 1) > 1);
+            }
+            showContextToolbar("table", cell.closest("table"));
+            return;
+        }
+        if (selectedImage && (!selectedImage.isConnected || !selectionTouchesImage(selectedImage))) {
+            selectedImage.classList.remove("is-selected");
+            selectedImage = null;
+        }
+        if (selectedImage?.isConnected) {
+            showContextToolbar("image", selectedImage);
+            return;
+        }
+        hideContextToolbar();
+    }
+
+    function showContextToolbar(kind, anchor) {
+        if (!anchor) {
+            hideContextToolbar();
+            return;
+        }
+        contextAnchor = anchor;
+        el.contextToolbar.hidden = false;
+        el.contextToolbar.setAttribute("aria-label", kind === "table" ? "表格工具" : "图片工具");
+        $$("[data-context]", el.contextToolbar).forEach((group) => {
+            group.hidden = group.dataset.context !== kind;
+        });
+        positionContextToolbar();
+    }
+
+    function hideContextToolbar() {
+        el.contextToolbar.hidden = true;
+        contextAnchor = null;
+        contextReturnRange = null;
+    }
+
+    function positionContextToolbar() {
+        if (el.contextToolbar.hidden || !contextAnchor?.isConnected) {
+            return;
+        }
+        const rect = contextAnchor.getBoundingClientRect();
+        if ((rect.width || rect.height) && (rect.bottom < 8 || rect.top > window.innerHeight - 8)) {
+            hideContextToolbar();
+            return;
+        }
+        const width = el.contextToolbar.offsetWidth || 300;
+        const height = el.contextToolbar.offsetHeight || 34;
+        let left = rect.left + (rect.width - width) / 2;
+        let top = rect.top - height - 8;
+        if (top < 8) {
+            top = rect.bottom + 8;
+        }
+        left = clamp(left, 8, Math.max(8, window.innerWidth - width - 8));
+        top = clamp(top, 8, Math.max(8, window.innerHeight - height - 8));
+        el.contextToolbar.style.left = `${Math.round(left)}px`;
+        el.contextToolbar.style.top = `${Math.round(top)}px`;
+    }
+
+    function handleContextToolbarClick(event) {
+        const tableButton = event.target.closest("[data-table-action]");
+        if (tableButton) {
+            executeTableAction(tableButton.dataset.tableAction);
+            return;
+        }
+        const imageButton = event.target.closest("[data-image-action]");
+        if (!imageButton || !selectedImage?.isConnected) {
+            return;
+        }
+        if (imageButton.dataset.imageAction === "edit") {
+            openImageSettings(selectedImage);
+        } else if (imageButton.dataset.imageAction === "delete") {
+            deleteSelectedImage();
+        }
+    }
+
+    function handleContextToolbarKeydown(event) {
+        if (event.key === "Escape") {
+            event.preventDefault();
+            restoreRange(contextReturnRange);
+            contextReturnRange = null;
+            scheduledSelectionUpdate();
+        }
+    }
+
+    function selectImage(image) {
+        if (!image || !el.editor.contains(image)) {
+            return;
+        }
+        clearImageSelection();
+        selectedImage = image;
+        image.classList.add("is-selected");
+        const range = document.createRange();
+        range.selectNode(image);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        el.editor.focus();
+        updateContextToolbar();
+    }
+
+    function clearImageSelection() {
+        if (selectedImage) {
+            selectedImage.classList.remove("is-selected");
+            selectedImage = null;
+        }
+        if (!currentTableCell()) {
+            hideContextToolbar();
+        }
+    }
+
+    function selectionTouchesImage(image) {
+        const selection = window.getSelection();
+        if (!selection?.rangeCount || !image?.isConnected) {
+            return false;
+        }
+        const range = selection.getRangeAt(0);
+        try {
+            return range.intersectsNode
+                ? range.intersectsNode(image)
+                : range.commonAncestorContainer === image || range.commonAncestorContainer.contains?.(image);
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function deleteSelectedImage() {
+        if (!selectedImage?.isConnected) {
+            return;
+        }
+        const image = selectedImage;
+        recordHistory();
+        image.remove();
+        clearImageSelection();
+        afterMutation();
+    }
+
+    function placeCaretBesideImage(image, after) {
+        const range = document.createRange();
+        if (after) {
+            range.setStartAfter(image);
+        } else {
+            range.setStartBefore(image);
+        }
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+
+    function handleEditorDoubleClick(event) {
+        const image = event.target.closest("img");
+        if (!image || !el.editor.contains(image)) {
+            return;
+        }
+        event.preventDefault();
+        selectImage(image);
+        openImageSettings(image);
+    }
+
     function handleEditorKeydown(event) {
         if (event.isComposing || event.keyCode === 229) {
             return;
@@ -1567,10 +2464,34 @@
             findStep(event.shiftKey ? -1 : 1);
             return;
         }
+        if (event.altKey && event.key === "F10") {
+            const first = Array.from(el.contextToolbar.querySelectorAll("button"))
+                .find((button) => !button.closest("[hidden]"));
+            if (first) {
+                event.preventDefault();
+                contextReturnRange = captureRange();
+                first.focus();
+            }
+            return;
+        }
         if (event.ctrlKey || event.metaKey || event.altKey) {
             return;
         }
 
+        if ((event.key === "Delete" || event.key === "Backspace")
+            && selectedImage?.isConnected
+            && selectionTouchesImage(selectedImage)) {
+            event.preventDefault();
+            deleteSelectedImage();
+            return;
+        }
+        if (event.key === "Tab" && selectedImage?.isConnected && selectionTouchesImage(selectedImage)) {
+            event.preventDefault();
+            placeCaretBesideImage(selectedImage, !event.shiftKey);
+            clearImageSelection();
+            scheduledSelectionUpdate();
+            return;
+        }
         if (event.key === "Tab") {
             event.preventDefault();
             handleTab(event.shiftKey);
@@ -1597,6 +2518,12 @@
         if (pre) {
             event.preventDefault();
             insertTextAtCaret("\n");
+            return true;
+        }
+
+        const cell = currentBlockElement()?.closest("td, th");
+        if (cell && splitTableCellParagraph(cell, range)) {
+            event.preventDefault();
             return true;
         }
 
@@ -1669,6 +2596,60 @@
         return false;
     }
 
+    function splitTableCellParagraph(cell, range) {
+        const startElement = range.startContainer.nodeType === Node.TEXT_NODE
+            ? range.startContainer.parentElement
+            : range.startContainer;
+        const candidate = startElement?.closest?.("p, div");
+        const block = candidate && cell.contains(candidate) ? candidate : null;
+
+        if (block) {
+            if (block.parentElement !== cell) {
+                return false;
+            }
+            if (Array.from(block.children).some((child) => TEXT_BLOCK_TAGS.has(child.tagName))) {
+                return false;
+            }
+            recordHistory();
+            const second = document.createElement("p");
+            second.append(range.extractContents());
+            if (!second.textContent.trim() && !second.querySelector("img, br, input")) {
+                second.innerHTML = "<br>";
+            }
+            if (!block.textContent.trim() && !block.querySelector("img, br, input")) {
+                block.innerHTML = "<br>";
+            }
+            block.after(second);
+            placeCaretAtStartIn(second);
+            afterMutation();
+            return true;
+        }
+
+        recordHistory();
+        const beforeRange = document.createRange();
+        beforeRange.selectNodeContents(cell);
+        beforeRange.setEnd(range.startContainer, range.startOffset);
+        const before = beforeRange.extractContents();
+        const after = document.createDocumentFragment();
+        while (cell.firstChild) {
+            after.append(cell.firstChild);
+        }
+        const first = document.createElement("p");
+        first.append(before);
+        const second = document.createElement("p");
+        second.append(after);
+        if (!first.textContent.trim() && !first.querySelector("img, br, input")) {
+            first.innerHTML = "<br>";
+        }
+        if (!second.textContent.trim() && !second.querySelector("img, br, input")) {
+            second.innerHTML = "<br>";
+        }
+        cell.replaceChildren(first, second);
+        placeCaretAtStartIn(second);
+        afterMutation();
+        return true;
+    }
+
     function listItemText(listItem) {
         let text = "";
         const walk = (node) => {
@@ -1718,6 +2699,19 @@
         if (pre) {
             insertTextAtCaret("    ");
             return;
+        }
+        const cell = block?.closest("td, th");
+        if (cell) {
+            const table = cell.closest("table");
+            if (table) {
+                recordHistory();
+                const moved = tableTools.moveCellFocus(table, cell, outdent ? -1 : 1);
+                if (moved?.cell) {
+                    selectCellContents(moved.cell);
+                    afterMutation();
+                }
+                return;
+            }
         }
         const listItem = block?.closest("li");
         if (listItem) {
@@ -1816,21 +2810,32 @@
         selection.addRange(range);
     }
 
-    async function handlePaste(event) {
+    function handlePaste(event) {
         event.preventDefault();
+        if (activeTab()?.loading) {
+            return;
+        }
         const clipboard = event.clipboardData;
         if (!clipboard) {
             return;
         }
+        const tabId = activeTabId;
         const range = captureRange();
         const imageFiles = clipboardImageFiles(clipboard);
-        if (imageFiles.length) {
-            await insertPastedImages(imageFiles, range);
-            return;
-        }
         const html = clipboard.getData("text/html");
         const text = clipboard.getData("text/plain");
+        queueTabOperation(() => applyPaste({ tabId, range, imageFiles, html, text })).catch(() => {});
+    }
 
+    async function applyPaste({ tabId, range, imageFiles, html, text }) {
+        if (activeTabId !== tabId || !rangeInEditor(range)) {
+            toast("标签已切换，粘贴操作已取消", "info");
+            return;
+        }
+        if (imageFiles.length) {
+            await insertPastedImages(imageFiles, range, tabId);
+            return;
+        }
         if (html) {
             recordHistory();
             const clean = sanitizePastedHTML(html);
@@ -1846,6 +2851,10 @@
         if (looksLikeMarkdown(text)) {
             try {
                 const result = await call("RenderMarkdown", text);
+                if (activeTabId !== tabId || !rangeInEditor(range)) {
+                    toast("标签已切换，粘贴操作已取消", "info");
+                    return;
+                }
                 recordHistory();
                 insertHTMLAtRange(result?.html || textToHTML(text), range);
                 afterMutation();
@@ -1857,6 +2866,10 @@
         recordHistory();
         insertHTMLAtRange(textToHTML(text), range);
         afterMutation();
+    }
+
+    function rangeInEditor(range) {
+        return !range || (el.editor.contains(range.startContainer) && el.editor.contains(range.endContainer));
     }
 
     function clipboardImageFiles(clipboard) {
@@ -1882,15 +2895,20 @@
         return files;
     }
 
-    async function insertPastedImages(files, range) {
+    async function insertPastedImages(files, range, tabId) {
         if (!state.path) {
-            const saved = await saveDocument(true);
+            const saved = await saveDocumentNow(true);
             if (!saved) {
                 toast("粘贴图片前需要先保存文档", "info");
                 return;
             }
         }
+        if (activeTabId !== tabId || !rangeInEditor(range)) {
+            toast("标签已切换，粘贴操作已取消", "info");
+            return;
+        }
 
+        const docPath = state.path;
         const savedImages = [];
         for (const file of files) {
             if (file.size > 20 * 1024 * 1024) {
@@ -1899,7 +2917,11 @@
             }
             try {
                 const dataURL = await readFileAsDataURL(file);
-                const saved = await call("SavePastedImage", dataURL);
+                if (activeTabId !== tabId) {
+                    toast("标签已切换，粘贴操作已取消", "info");
+                    return;
+                }
+                const saved = await call("SavePastedImage", dataURL, docPath);
                 if (saved?.relativePath) {
                     savedImages.push({ ...saved, name: file.name || "粘贴图片" });
                 }
@@ -1908,6 +2930,10 @@
             }
         }
         if (!savedImages.length) {
+            return;
+        }
+        if (activeTabId !== tabId || !rangeInEditor(range)) {
+            toast("图片已保存，但标签已切换，未插入正文", "info");
             return;
         }
 
@@ -2016,6 +3042,9 @@
             CODE: new Set(["class"]),
             OL: new Set(["start"]),
             INPUT: new Set(["type", "checked"]),
+            TD: new Set(["colspan", "rowspan", "align"]),
+            TH: new Set(["colspan", "rowspan", "align"]),
+            COL: new Set(["span", "width"]),
         };
         for (const element of Array.from(root.querySelectorAll("*"))) {
             const allowed = allowedAttributes[element.tagName] || new Set();
@@ -2042,6 +3071,32 @@
                 }
                 element.removeAttribute("disabled");
                 element.setAttribute("type", "checkbox");
+            } else if (element.tagName === "TD" || element.tagName === "TH") {
+                for (const name of ["colspan", "rowspan"]) {
+                    const span = Number.parseInt(element.getAttribute(name) || "1", 10);
+                    if (Number.isFinite(span) && span > 1 && span <= 1000) {
+                        element.setAttribute(name, String(span));
+                    } else {
+                        element.removeAttribute(name);
+                    }
+                }
+                const align = (element.getAttribute("align") || "").toLowerCase();
+                if (!["left", "center", "right"].includes(align)) {
+                    element.removeAttribute("align");
+                } else {
+                    element.setAttribute("align", align);
+                }
+            } else if (element.tagName === "COL") {
+                const span = Number.parseInt(element.getAttribute("span") || "1", 10);
+                if (Number.isFinite(span) && span > 1 && span <= 1000) {
+                    element.setAttribute("span", String(span));
+                } else {
+                    element.removeAttribute("span");
+                }
+                const width = element.getAttribute("width") || "";
+                if (!/^\d{1,5}%?$/.test(width)) {
+                    element.removeAttribute("width");
+                }
             } else if (element.tagName === "CODE") {
                 const className = element.className || "";
                 const language = className.match(/language-[\w-]+/);
@@ -2096,11 +3151,17 @@
         const checkbox = event.target.closest("input[type='checkbox']");
         if (checkbox) {
             recordHistory();
-            window.setTimeout(() => {
-                afterMutation();
-            }, 0);
+            afterMutation();
             return;
         }
+
+        const image = event.target.closest("img");
+        if (image && el.editor.contains(image)) {
+            event.preventDefault();
+            selectImage(image);
+            return;
+        }
+        clearImageSelection();
 
         const anchor = event.target.closest("a[href]");
         if (!anchor) {
@@ -2108,7 +3169,7 @@
         }
         event.preventDefault();
         if (event.ctrlKey || event.metaKey) {
-            openLink(anchor.getAttribute("href") || "");
+            openLink(anchor.getAttribute("href") || "", activeTabId, state.path);
             return;
         }
         const caret = document.caretRangeFromPoint?.(event.clientX, event.clientY);
@@ -2119,8 +3180,16 @@
         }
     }
 
-    async function openLink(href) {
+    function openLink(href, tabId = activeTabId, basePath = state.path) {
+        return queueTabOperation(() => openLinkNow(href, tabId, basePath));
+    }
+
+    async function openLinkNow(href, tabId, basePath) {
         if (!href) {
+            return;
+        }
+        if (activeTabId !== tabId) {
+            toast("标签已切换，链接打开操作已取消", "info");
             return;
         }
         if (href.startsWith("#")) {
@@ -2135,16 +3204,25 @@
             return;
         }
         if (/\.(md|markdown|mdown|mkd|txt)(?:[?#].*)?$/i.test(href)) {
-            if (!(await confirmUnsaved())) {
+            if (activeTabId !== tabId) {
+                toast("标签已切换，链接打开操作已取消", "info");
                 return;
             }
-            const resolved = await safeCall("ResolveDocumentLink", href);
+            if (!basePath && !/^[a-z]:[\\/]|^\\\\/i.test(href)) {
+                toast("请先保存当前文档，再打开相对链接", "info");
+                return;
+            }
+            const resolved = await safeCall("ResolveDocumentLink", href, basePath);
             if (!resolved) {
+                return;
+            }
+            if (activeTabId !== tabId) {
+                toast("标签已切换，链接打开操作已取消", "info");
                 return;
             }
             const doc = await safeCall("OpenPath", resolved);
             if (doc) {
-                await loadDocument(doc, { focus: true, announce: true });
+                await addDocumentTabNow(doc, { focus: true, announce: true });
             }
             return;
         }
@@ -2171,6 +3249,21 @@
             return;
         }
         const key = event.key.toLowerCase();
+        if (key === "tab") {
+            event.preventDefault();
+            switchTab(event.shiftKey ? -1 : 1);
+            return;
+        }
+        if (key === "pagedown" || key === "pageup") {
+            event.preventDefault();
+            switchTab(key === "pagedown" ? 1 : -1);
+            return;
+        }
+        if (key === "w") {
+            event.preventDefault();
+            closeTab();
+            return;
+        }
         if (key === "z" && !event.shiftKey) {
             if (undoEditor()) {
                 event.preventDefault();
@@ -2403,61 +3496,152 @@
         toast(`已替换 ${replaced} 处`, "success");
     }
 
-    async function openDocument() {
-        if (!(await confirmUnsaved())) {
-            return;
-        }
+    function openDocument() {
+        return queueTabOperation(() => openDocumentNow());
+    }
+
+    async function openDocumentNow() {
         const doc = await safeCall("OpenFileDialog");
         if (doc) {
-            await loadDocument(doc, { focus: true, announce: true });
-            await clearRecoveryDraft();
+            await addDocumentTabNow(doc, { focus: true, announce: true, replacePristine: true });
         }
     }
 
-    async function openDroppedPath(paths) {
-        if (!(await confirmUnsaved())) {
-            return;
-        }
-        if (paths.length > 1) {
-            toast("一次只打开一个文件，已选择第一个", "info");
-        }
-        const doc = await safeCall("OpenPath", paths[0]);
-        if (doc) {
-            await loadDocument(doc, { focus: true, announce: true });
-            await clearRecoveryDraft();
+    function openDroppedPath(paths) {
+        return queueTabOperation(() => openDroppedPathNow(paths));
+    }
+
+    async function openDroppedPathNow(paths) {
+        let replacePristine = true;
+        for (const path of paths) {
+            const doc = await safeCall("OpenPath", path);
+            if (doc) {
+                await addDocumentTabNow(doc, { focus: true, announce: true, replacePristine });
+                replacePristine = false;
+            }
         }
     }
 
-    async function saveDocument(saveAs) {
+    function saveDocument(saveAs) {
+        return queueTabOperation(() => saveDocumentNow(saveAs));
+    }
+
+    async function saveDocumentNow(saveAs) {
+        const tab = activeTab();
+        if (!tab) {
+            return false;
+        }
         const contentAtSave = syncSourceNow();
-        const result = saveAs
-            ? await safeCall("SaveDocumentAs", contentAtSave)
+        const needsPath = saveAs || !state.path;
+        const openPaths = needsPath
+            ? tabs.filter((item) => item.id !== tab.id && item.path).map((item) => item.path)
+            : [];
+        const result = needsPath
+            ? await safeCall("SaveDocumentAs", contentAtSave, openPaths)
             : await safeCall("SaveDocument", state.path, contentAtSave);
         if (!result || result.canceled) {
+            return false;
+        }
+        const conflict = findTabByPath(result.path);
+        if (conflict && conflict.id !== tab.id) {
+            toast(`“${result.name || result.path}”已在另一个标签中打开`, "error");
             return false;
         }
         state.path = result.path || state.path;
         state.name = result.name || state.name;
         state.savedContent = contentAtSave;
-        await clearRecoveryDraft();
         postProcessEditor();
         syncSourceNow();
         updateDocumentMeta();
         setDirty(state.source !== state.savedContent);
+        syncActiveTabFields(tab);
+        await clearTabRecoveryDraft(tab);
+        if (state.dirty) {
+            scheduleRecoveryDraft(tab.id);
+        }
+        renderTabs(true);
         toast("已保存", "success");
         return true;
     }
 
-    async function newDocument() {
-        if (!(await confirmUnsaved())) {
+    function newDocument() {
+        return queueTabOperation(() => newDocumentNow());
+    }
+
+    async function newDocumentNow() {
+        const current = activeTab();
+        const name = isPristineTab(current) ? current.name : nextUntitledName();
+        await addDocumentTabNow(
+            { path: "", name, content: "", size: 0 },
+            { focus: true, announce: false, replacePristine: true }
+        );
+    }
+
+    function closeTab(id = activeTabId) {
+        return queueTabOperation(() => closeTabNow(id));
+    }
+
+    async function closeTabNow(id = activeTabId) {
+        const tab = tabById(id);
+        if (!tab) {
             return;
         }
-        await safeCall("ResetDocument");
-        await loadDocument(
-            { path: "", name: "未命名.md", content: "", size: 0 },
-            { focus: true, announce: false }
-        );
-        await clearRecoveryDraft();
+
+        const previousActiveId = activeTabId;
+        const wasActive = tab.id === activeTabId;
+        let activatedForClose = false;
+        if (!wasActive && tab.dirty) {
+            await activateTabNow(tab.id, { focus: false });
+            activatedForClose = true;
+        }
+
+        if (tab.dirty && !(await confirmUnsaved())) {
+            if (activatedForClose) {
+                await activateTabNow(previousActiveId, { focus: false });
+            }
+            return;
+        }
+
+        const index = tabs.findIndex((item) => item.id === tab.id);
+        if (index === -1) {
+            return;
+        }
+        tabs.splice(index, 1);
+        tabsRenderKey = "";
+        tab.removed = true;
+        await clearTabRecoveryDraft(tab);
+
+        if (!tabs.length) {
+            activeTabId = "";
+            const blank = {
+                path: "",
+                name: "未命名.md",
+                content: "",
+                size: 0,
+            };
+            await safeCall("SetActiveDocument", "");
+            await addDocumentTabNow(blank, { focus: true, announce: false });
+            return;
+        }
+
+        if (activatedForClose) {
+            const previous = tabById(previousActiveId);
+            if (previous) {
+                activeTabId = "";
+                await activateTabNow(previous.id, { focus: false });
+                return;
+            }
+        }
+
+        if (tab.id === activeTabId) {
+            const neighbor = tabs[Math.min(index, tabs.length - 1)];
+            activeTabId = "";
+            await activateTabNow(neighbor.id, { focus: true });
+            return;
+        }
+
+        call("SetDirty", tabs.some((item) => item.dirty)).catch(() => {});
+        renderTabs(true);
     }
 
     async function confirmUnsaved() {
@@ -2474,12 +3658,16 @@
             ],
         });
         if (action === "save") {
-            return saveDocument(false);
+            return saveDocumentNow(false);
         }
         return action === "discard";
     }
 
-    async function handleCloseRequest() {
+    function handleCloseRequest() {
+        return queueTabOperation(() => handleCloseRequestNow());
+    }
+
+    async function handleCloseRequestNow() {
         if (state.closePromptOpen) {
             return;
         }
@@ -2487,33 +3675,54 @@
             await safeCall("CancelQuit");
             return;
         }
-        if (state.dirty) {
-            await persistRecoveryDraft();
-        }
-        state.closePromptOpen = true;
-        const action = await showModal({
-            title: "退出 Mdmuder？",
-            message: `“${state.name}” 尚未保存。你可以保存后退出，或放弃这次修改。`,
-            buttons: [
-                { label: "取消", value: "cancel" },
-                { label: "不保存", value: "discard", kind: "danger" },
-                { label: "保存并退出", value: "save", kind: "primary" },
-            ],
-        });
-        state.closePromptOpen = false;
-
-        if (action === "discard") {
-            await clearRecoveryDraft();
+        captureActiveTab();
+        const dirtyTabs = tabs.filter((tab) => tab.dirty);
+        if (!dirtyTabs.length) {
+            await clearAllRecoveryDrafts();
             await safeCall("QuitApp");
-        } else if (action === "save") {
-            const saved = await saveDocument(false);
-            if (saved) {
-                await safeCall("QuitApp");
-            } else {
+            return;
+        }
+
+        state.closePromptOpen = true;
+        let quitting = false;
+        try {
+            for (const tab of dirtyTabs) {
+                await activateTabNow(tab.id, { focus: false });
+                await persistRecoveryDraft(tab.id);
+                const action = await showModal({
+                    title: "退出 Mdmuder？",
+                    message: dirtyTabs.length > 1
+                        ? `“${tab.name}” 尚未保存（共 ${dirtyTabs.length} 个文档有修改）。你可以保存后退出，或放弃这次修改。`
+                        : `“${tab.name}” 尚未保存。你可以保存后退出，或放弃这次修改。`,
+                    buttons: [
+                        { label: "取消", value: "cancel" },
+                        { label: "不保存", value: "discard", kind: "danger" },
+                        { label: "保存并退出", value: "save", kind: "primary" },
+                    ],
+                });
+                if (action === "cancel") {
+                    await safeCall("CancelQuit");
+                    return;
+                }
+                if (action === "discard") {
+                    await clearTabRecoveryDraft(tab);
+                    continue;
+                }
+                const saved = await saveDocumentNow(false);
+                if (!saved) {
+                    await safeCall("CancelQuit");
+                    return;
+                }
+            }
+            await clearAllRecoveryDrafts();
+            quitting = true;
+            await safeCall("QuitApp");
+        } finally {
+            state.closePromptOpen = false;
+            if (!quitting) {
+                call("SetDirty", tabs.some((tab) => tab.dirty)).catch(() => {});
                 await safeCall("CancelQuit");
             }
-        } else {
-            await safeCall("CancelQuit");
         }
     }
 
@@ -2690,6 +3899,149 @@
         });
     }
 
+    function showFormModal({ title, message, fields, confirmLabel, validate }) {
+        if (state.modalOpen) {
+            return Promise.resolve(null);
+        }
+        state.modalOpen = true;
+        const previouslyFocused = document.activeElement;
+        el.modalTitle.textContent = title;
+        el.modalMessage.textContent = message;
+        el.modalMessage.classList.remove("is-mono");
+        el.modalActions.replaceChildren();
+
+        const form = document.createElement("div");
+        form.className = "modal-fields";
+        form.id = "modalFields";
+        const inputs = new Map();
+        for (const field of fields) {
+            const label = document.createElement("label");
+            label.className = "modal-field";
+            const caption = document.createElement("span");
+            caption.textContent = field.label;
+            const input = document.createElement("input");
+            input.type = field.type || "text";
+            input.name = field.name;
+            input.value = field.value || "";
+            input.placeholder = field.placeholder || "";
+            input.autocomplete = "off";
+            input.spellcheck = false;
+            if (field.min !== undefined) {
+                input.min = field.min;
+            }
+            if (field.max !== undefined) {
+                input.max = field.max;
+            }
+            if (field.step !== undefined) {
+                input.step = field.step;
+            }
+            if (field.inputMode) {
+                input.inputMode = field.inputMode;
+            }
+            label.append(caption, input);
+            form.append(label);
+            inputs.set(field.name, input);
+        }
+        const error = document.createElement("p");
+        error.className = "modal-error";
+        error.hidden = true;
+        error.setAttribute("role", "alert");
+        el.modalMessage.after(form, error);
+        el.modalBackdrop.hidden = false;
+
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (result) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                state.modalOpen = false;
+                el.modalBackdrop.hidden = true;
+                form.remove();
+                error.remove();
+                document.removeEventListener("keydown", onKey, true);
+                el.modalBackdrop.removeEventListener("click", onBackdrop);
+                if (previouslyFocused && typeof previouslyFocused.focus === "function") {
+                    previouslyFocused.focus();
+                }
+                resolve(result);
+            };
+            const confirm = () => {
+                const values = Object.fromEntries(
+                    Array.from(inputs, ([name, input]) => [name, input.value.trim()])
+                );
+                const messageText = validate?.(values) || "";
+                if (messageText) {
+                    error.textContent = messageText;
+                    error.hidden = false;
+                    return;
+                }
+                error.hidden = true;
+                finish(values);
+            };
+            const cancel = () => finish(null);
+            const onKey = (event) => {
+                if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    cancel();
+                    return;
+                }
+                if (event.key === "Enter" && event.target.tagName !== "BUTTON") {
+                    event.preventDefault();
+                    confirm();
+                    return;
+                }
+                if (event.key === "Tab") {
+                    const focusable = [
+                        ...Array.from(inputs.values()),
+                        ...Array.from(el.modalActions.querySelectorAll("button")),
+                    ].filter((item) => !item.disabled);
+                    if (!focusable.length) {
+                        return;
+                    }
+                    const first = focusable[0];
+                    const last = focusable[focusable.length - 1];
+                    if (!el.modalBackdrop.contains(document.activeElement)) {
+                        event.preventDefault();
+                        first.focus();
+                    } else if (event.shiftKey && document.activeElement === first) {
+                        event.preventDefault();
+                        last.focus();
+                    } else if (!event.shiftKey && document.activeElement === last) {
+                        event.preventDefault();
+                        first.focus();
+                    }
+                }
+            };
+            const onBackdrop = (event) => {
+                if (event.target === el.modalBackdrop) {
+                    cancel();
+                }
+            };
+            document.addEventListener("keydown", onKey, true);
+            el.modalBackdrop.addEventListener("click", onBackdrop);
+
+            const cancelButton = document.createElement("button");
+            cancelButton.type = "button";
+            cancelButton.textContent = "取消";
+            cancelButton.addEventListener("click", cancel);
+            const confirmButton = document.createElement("button");
+            confirmButton.type = "button";
+            confirmButton.className = "primary";
+            confirmButton.textContent = confirmLabel;
+            confirmButton.addEventListener("click", confirm);
+            el.modalActions.append(cancelButton, confirmButton);
+
+            requestAnimationFrame(() => {
+                const firstInput = inputs.values().next().value;
+                firstInput?.focus();
+                firstInput?.select();
+            });
+        });
+    }
+
     function showShortcuts() {
         showModal({
             title: "键盘快捷键",
@@ -2698,6 +4050,8 @@
                 "打开文件          Ctrl+O",
                 "保存              Ctrl+S",
                 "另存为            Ctrl+Shift+S",
+                "关闭当前标签      Ctrl+W",
+                "切换标签          Ctrl+Tab / Ctrl+Shift+Tab",
                 "撤销 / 重做       Ctrl+Z / Ctrl+Y",
                 "粗体              Ctrl+B",
                 "斜体              Ctrl+I",

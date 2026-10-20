@@ -134,7 +134,7 @@ func TestResolveDocumentLink(t *testing.T) {
 
 	app := NewApp()
 	app.docPath = filepath.Join(dir, "note.md")
-	resolved, err := app.ResolveDocumentLink("other.md#section")
+	resolved, err := app.ResolveDocumentLink("other.md#section", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,10 +142,10 @@ func TestResolveDocumentLink(t *testing.T) {
 		t.Fatalf("expected %q, got %q", target, resolved)
 	}
 
-	if _, err := app.ResolveDocumentLink("https://example.com/other.md"); err == nil {
+	if _, err := app.ResolveDocumentLink("https://example.com/other.md", ""); err == nil {
 		t.Fatal("expected remote link to be rejected")
 	}
-	if _, err := app.ResolveDocumentLink("image.png"); err == nil {
+	if _, err := app.ResolveDocumentLink("image.png", ""); err == nil {
 		t.Fatal("expected non-Markdown link to be rejected")
 	}
 }

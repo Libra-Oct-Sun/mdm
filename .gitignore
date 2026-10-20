@@ -1,5 +1,6 @@
 # Wails output
 build/bin
+frontend/wailsjs/go/
 build/windows/appicon.ico
 build/windows/installer/wails_tools.nsh
 build/windows/installer/tmp/

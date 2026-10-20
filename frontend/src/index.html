@@ -78,6 +78,7 @@
                     <button data-command="new"><span>新建文档</span><kbd>Ctrl N</kbd></button>
                     <button data-command="open"><span>打开文件</span><kbd>Ctrl O</kbd></button>
                     <button data-command="save-as"><span>另存为</span><kbd>Ctrl ⇧ S</kbd></button>
+                    <button data-command="close-tab"><span>关闭当前标签</span><kbd>Ctrl W</kbd></button>
                     <div class="menu-separator"></div>
                     <button data-command="insert-table"><span>插入表格</span></button>
                     <button data-command="insert-hr"><span>插入分隔线</span></button>
@@ -93,6 +94,15 @@
             </div>
         </div>
     </header>
+
+    <nav class="tabbar" aria-label="已打开的文档">
+        <div class="tab-list" id="tabList" role="tablist" aria-label="文档标签"></div>
+        <button class="tab-new" id="btnNewTab" title="新建文档 (Ctrl+N)" aria-label="新建文档">
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M10 4.5v11M4.5 10h11"></path>
+            </svg>
+        </button>
+    </nav>
 
     <div class="formatbar" aria-label="格式工具栏">
         <div class="format-group">
@@ -204,7 +214,7 @@
             </div>
         </aside>
 
-        <section class="pane editor-pane" id="editorPane">
+        <section class="pane editor-pane" id="editorPane" role="tabpanel" aria-label="当前文档">
             <div class="writing-scroll" id="editorScroll">
                 <div class="writing-column">
                     <div class="editor-surface markdown-body"
@@ -215,6 +225,32 @@
                          aria-label="Markdown 文档编辑器"
                          spellcheck="false"
                          data-placeholder="开始写作……"></div>
+                </div>
+            </div>
+            <div class="context-toolbar" id="contextToolbar" role="toolbar" aria-label="表格工具"
+                 aria-keyshortcuts="Alt+F10" hidden>
+                <div class="context-group" data-context="table" hidden>
+                    <button type="button" data-table-action="row-above" title="在上方插入行" aria-label="在上方插入行">↑行</button>
+                    <button type="button" data-table-action="row-below" title="在下方插入行" aria-label="在下方插入行">↓行</button>
+                    <button type="button" data-table-action="row-delete" class="is-destructive"
+                            title="删除当前行" aria-label="删除当前行">删行</button>
+                    <span class="context-sep" aria-hidden="true"></span>
+                    <button type="button" data-table-action="col-before" title="在左侧插入列" aria-label="在左侧插入列">←列</button>
+                    <button type="button" data-table-action="col-after" title="在右侧插入列" aria-label="在右侧插入列">→列</button>
+                    <button type="button" data-table-action="col-delete" class="is-destructive"
+                            title="删除当前列" aria-label="删除当前列">删列</button>
+                    <span class="context-sep" aria-hidden="true"></span>
+                    <button type="button" data-table-action="merge" title="合并选中的单元格" aria-label="合并单元格">合并</button>
+                    <button type="button" data-table-action="split" title="拆分当前合并单元格" aria-label="拆分单元格">拆分</button>
+                    <span class="context-sep" aria-hidden="true"></span>
+                    <button type="button" data-table-action="table-delete" class="is-destructive"
+                            title="删除整张表格" aria-label="删除整张表格">删表</button>
+                </div>
+                <div class="context-group" data-context="image" hidden>
+                    <span class="context-label">图片</span>
+                    <button type="button" data-image-action="edit" title="编辑图片说明和尺寸" aria-label="编辑图片">编辑</button>
+                    <button type="button" data-image-action="delete" class="is-destructive"
+                            title="从文档中删除图片" aria-label="删除图片">删除</button>
                 </div>
             </div>
             <div class="find-bar" id="findBar" hidden>
@@ -266,7 +302,7 @@
                 <path d="M4 15.5v3A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-3"></path>
             </svg>
             <strong>松开以打开 Markdown 文件</strong>
-            <span>当前未保存的内容会先询问是否保存</span>
+            <span>每个文件会在独立标签页中打开</span>
         </div>
     </div>
 
@@ -287,6 +323,7 @@
     </div>
 </div>
 <script src="/markdown-serializer.js"></script>
+<script src="/editor-tables.js"></script>
 <script src="/editor-search.js"></script>
 <script src="/main.js"></script>
 </body>

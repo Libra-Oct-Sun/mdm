@@ -32,6 +32,8 @@ try {
     Assert-Success "go test"
     node --check frontend/src/markdown-serializer.js
     Assert-Success "markdown serializer syntax check"
+    node --check frontend/src/editor-tables.js
+    Assert-Success "editor tables syntax check"
     node --check frontend/src/editor-search.js
     Assert-Success "editor search syntax check"
     node --check frontend/src/main.js
